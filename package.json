@@ -15,7 +15,7 @@
   "homepage": "https://github.com/wellrccity/opencode-browser-bridge#readme",
   "scripts": {
     "start": "node server/src/index.js",
-    "test": "node --test test/bridge.test.js test/mcp.test.js",
+    "test": "node --test test/bridge.test.js test/proxy.test.js test/mcp.test.js",
     "icons": "node scripts/make-icons.mjs",
     "check": "node scripts/check.mjs"
   },

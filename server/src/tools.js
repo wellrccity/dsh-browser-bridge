@@ -73,6 +73,89 @@ export function registerTools(server, bridge) {
     });
   };
 
+  register('visual', {
+    title: 'Visual snapshot (screenshot or surface summary)',
+    description: 'Capture what is visually on the surface of the page right now — including modals, overlays, dropdowns, iframes and floating UI. Returns a compact JPEG screenshot (or a text summary of open modals/overlays if textOnly=true for non-vision models). Use this FIRST before snapshot/DOM when you need to understand the current visual state. Much cheaper than a full accessibility tree for orientation.',
+    inputSchema: {
+      tabId: z.number().int().optional(),
+      fullPage: z.boolean().optional().describe('Capture the full scrollable page instead of just the viewport.'),
+      textOnly: z.boolean().optional().describe('Return a text summary of visible modals, overlays and iframes instead of an image. Ideal for non-vision models to avoid image token costs.'),
+      quality: z.number().int().min(30).max(95).optional().describe('JPEG quality 30-95. Default 72.'),
+      maxWidth: z.number().int().min(200).max(2560).optional().describe('Max width in px. Default 1280.'),
+      maxHeight: z.number().int().min(200).max(4000).optional().describe('Max height in px. Default 900.')
+    }
+  }, async (args) => {
+    const result = await bridge.request('visual', args, { timeout: 30000 });
+    if (args.textOnly || result.textOnly) {
+      const lines = ['Visual surface summary:'];
+      if (result.tab) lines.push(`Page: ${result.tab.title || '(untitled)'} — ${result.tab.url}`);
+      lines.push(result.surface || 'Page surface is clear (no modals, dialogs, or prominent overlays detected).');
+      return textResult(lines.join('\n'));
+    }
+    if (!result.image || !result.image.base64) throw new Error('The extension did not return screenshot data.');
+    const lines = [`Visual snapshot: ${result.width}×${result.height}px (JPEG).`];
+    if (result.tab) lines.push(`Page: ${result.tab.title || '(untitled)'} — ${result.tab.url}`);
+    if (result.surface && !result.surface.includes('Page surface is clear')) {
+      lines.push(`Surface detected:\n${result.surface}`);
+    }
+    if (result.fallbackReason) lines.push(`Note: ${result.fallbackReason}`);
+    return imageResult(lines.join('\n'), result.image);
+  });
+
+  register('cursor', {
+    title: 'Cursor (navigate, move, hover and click)',
+    description: 'Control the visible glowing cursor and execute clicks or hovers. This is the single, primary tool for in-page navigation and clicking. Target an element by ref (preferred), selector, visible text, or x/y coordinates without needing manual coordinates — the cursor will automatically move to the element and click it.',
+    inputSchema: {
+      tabId: z.number().int().optional(),
+      frameId: z.number().int().optional(),
+      action: z.enum(['click', 'move', 'hover', 'show', 'hide']).default('click').describe('"click" (default): moves cursor to element/coords and clicks it. "move": moves cursor to element/coords and inspects it. "hover": moves and hovers. "hide": removes cursor overlay.'),
+      ref: z.string().optional().describe('Element ref from snapshot (e.g. "f0_e4"). Cursor moves to its center automatically.'),
+      selector: z.string().optional().describe('CSS selector to target. Cursor moves to its center automatically.'),
+      text: z.string().optional().describe('Visible text or accessible name to match. Cursor moves to its center automatically.'),
+      exactText: z.boolean().optional(),
+      x: z.number().optional().describe('Viewport X coordinate (optional fallback if not using ref/selector/text).'),
+      y: z.number().optional().describe('Viewport Y coordinate.'),
+      button: z.enum(['left', 'right', 'middle']).default('left'),
+      clickCount: z.number().int().min(1).max(3).default(1),
+      modifiers: modifiers.optional(),
+      trusted: z.boolean().optional().describe('true = real CDP input; false = DOM events.'),
+      human: z.boolean().optional().describe('Move the mouse along a human-like path. Default false.'),
+      animate: z.boolean().optional().describe('Animate cursor movement. Default true.'),
+      steps: z.number().int().min(1).max(30).optional().describe('Animation steps. Default 6.'),
+      waitUntil: waitUntil.default('domcontentloaded'),
+      timeout: z.number().int().min(1000).max(120000).default(30000),
+      detectNavigationMs: z.number().int().min(100).max(5000).optional().describe('How long to watch for navigation after clicking. Default 700.'),
+      switchToNewTab: z.boolean().optional(),
+      delayAfter: z.number().int().min(0).max(5000).optional()
+    }
+  }, async (args) => {
+    if (args.action !== 'hide') {
+      requireTarget(args);
+      if ((args.x == null) !== (args.y == null)) throw new Error('Provide both x and y, or neither.');
+    }
+    const result = await bridge.request('cursor', args, { timeout: (args.timeout || 30000) + 20000 });
+    if (args.action === 'hide') return textResult(`Cursor hidden on tab ${result.tab?.id ?? '?'}.`);
+    if (result.action === 'click' || result.clicked) {
+      return textResult(formatClick(result));
+    }
+    if (result.action === 'hover' || result.hovered) {
+      const targetDesc = result.target ? `${result.target.ref || ''} <${result.target.tag || ''}> "${result.target.name || result.target.text || ''}"` : 'element';
+      return textResult(`Cursor hovered ${targetDesc} at (${result.x}, ${result.y}) via ${result.via || 'cdp'}.`);
+    }
+    const lines = [`Cursor ${args.action === 'show' ? 'shown' : 'moved'} to (${result.x}, ${result.y}) on tab ${result.tab?.id ?? '?'}.`];
+    const t = result.target || result.elementUnderCursor;
+    if (t) {
+      const desc = [
+        t.tag ? `<${t.tag}>` : '',
+        t.role ? `[role="${t.role}"]` : '',
+        t.name || t.text ? `"${t.name || t.text}"` : '',
+        t.ariaLabel ? `aria-label="${t.ariaLabel}"` : ''
+      ].filter(Boolean).join(' ');
+      lines.push(`Element under cursor: ${desc || '(empty/background)'}`);
+    }
+    return textResult(lines.join('\n'));
+  });
+
   register('status', {
     title: 'Browser status',
     description: 'Check whether the Chrome extension is connected, list open tabs and show the active tab. Call this first when browser tools seem unavailable.',
@@ -171,48 +254,19 @@ export function registerTools(server, bridge) {
     return imageResult(formatScreenshot(result), result.image);
   });
 
-  register('click', {
-    title: 'Click',
-    description: 'Click an element by ref (preferred), CSS selector, visible text, or viewport coordinates. Uses trusted CDP input by default and falls back to DOM events. Waits for a navigation if one starts.',
-    inputSchema: {
-      tabId: z.number().int().optional(),
-      frameId: z.number().int().optional(),
-      ref: z.string().optional(),
-      selector: z.string().optional(),
-      text: z.string().optional().describe('Visible text or accessible name to match.'),
-      exactText: z.boolean().optional(),
-      x: z.number().optional().describe('Viewport X coordinate, if not using ref/selector/text.'),
-      y: z.number().optional(),
-      button: z.enum(['left', 'right', 'middle']).default('left'),
-      clickCount: z.number().int().min(1).max(3).default(1),
-      modifiers: modifiers.optional(),
-      trusted: z.boolean().optional().describe('true = real CDP input; false = DOM events.'),
-      human: z.boolean().optional().describe('Move the mouse along a human-like path. Default false (faster); set true only when a site needs human-like movement.'),
-      waitUntil: waitUntil.default('domcontentloaded'),
-      timeout: z.number().int().min(1000).max(120000).default(30000),
-      detectNavigationMs: z.number().int().min(100).max(5000).optional().describe('How long to watch for a navigation after the click. Default 700.'),
-      switchToNewTab: z.boolean().optional(),
-      delayAfter: z.number().int().min(0).max(5000).optional()
-    }
-  }, async (args) => {
-    requireTarget(args);
-    if ((args.x == null) !== (args.y == null)) throw new Error('Provide both x and y, or neither.');
-    const result = await bridge.request('click', args, { timeout: (args.timeout || 30000) + 20000 });
-    return textResult(formatClick(result));
-  });
-
   register('type', {
     title: 'Type text',
-    description: 'Type into an input, textarea or contenteditable element. Clears the field by default and uses trusted CDP keystrokes. Set pressEnter=true to submit. If no target is given, types into the focused element.',
+    description: 'Type into an input, textarea or contenteditable element. When a target is provided (ref or selector), the cursor automatically moves to the element and clicks it to activate/focus it first, then executes natural typing via insertText without DOM manipulation. Clears the field by default and uses trusted CDP keystrokes. Set pressEnter=true to submit.',
     inputSchema: {
       tabId: z.number().int().optional(),
       frameId: z.number().int().optional(),
-      ref: z.string().optional(),
-      selector: z.string().optional(),
+      ref: z.string().optional().describe('Element ref to type into. Cursor moves to element and clicks it to activate first.'),
+      selector: z.string().optional().describe('CSS selector to type into. Cursor moves to element and clicks it to activate first.'),
       focused: z.boolean().optional().describe('Type into the currently focused element.'),
-      text: z.string(),
+      text: z.string().describe('Text to type.'),
       clear: z.boolean().optional().describe('Clear the field before typing. Default true.'),
-      delay: z.number().int().min(0).max(1000).optional().describe('Delay per character in ms.'),
+      delay: z.number().int().min(0).max(1000).optional().describe('Delay per character in ms (defaults to human typing cadence).'),
+      natural: z.boolean().optional().default(true).describe('Use insertText for natural typing without DOM manipulation. Default true.'),
       pressEnter: z.boolean().optional(),
       trusted: z.boolean().optional(),
       waitUntil: waitUntil.default('domcontentloaded'),
@@ -251,29 +305,9 @@ export function registerTools(server, bridge) {
     return textResult(lines.join('\n'));
   });
 
-  register('hover', {
-    title: 'Hover',
-    description: 'Move the real mouse over an element to trigger CSS :hover, tooltips and menus. Falls back to synthetic mouse events without CDP.',
-    inputSchema: {
-      tabId: z.number().int().optional(),
-      frameId: z.number().int().optional(),
-      ref: z.string().optional(),
-      selector: z.string().optional(),
-      text: z.string().optional(),
-      trusted: z.boolean().optional(),
-      durationMs: z.number().int().min(0).max(10000).optional().describe('Keep the page open after hovering.'),
-      steps: z.number().int().min(1).max(80).optional(),
-      duration: z.number().int().min(0).max(3000).optional().describe('Mouse movement duration in ms.')
-    }
-  }, async (args) => {
-    requireTarget(args);
-    const result = await bridge.request('hover', args, { timeout: 20000 });
-    return textResult(`Hovered ${result.target ? `${result.target.ref || ''} <${result.target.tag || ''}> "${result.target.name || ''}"` : 'element'} via ${result.via}.`);
-  });
-
   register('select', {
     title: 'Select option',
-    description: 'Choose one or more options in a native <select> by value, label or index. For custom dropdowns, click the trigger and then click an option with chrome_click.',
+    description: 'Choose one or more options in a native <select> or a visible custom combobox by value, label or index. Custom controls are opened and their visible option is clicked automatically; use chrome_cursor when the widget has no semantic combobox/listbox role.',
     inputSchema: {
       tabId: z.number().int().optional(),
       frameId: z.number().int().optional(),
@@ -510,26 +544,6 @@ export function registerTools(server, bridge) {
     const result = await bridge.request('dialog', args, { timeout: 15000 });
     if (args.action === 'clear') return textResult('Dialog log cleared.');
     return textResult(formatDialog(result));
-  });
-
-  register('highlight', {
-    title: 'Highlight elements',
-    description: 'Draw temporary labeled outlines over one element, all elements with refs, or a selector/text match on the live page. Useful for visual debugging and demos.',
-    inputSchema: {
-      tabId: z.number().int().optional(),
-      frameId: z.number().int().optional(),
-      action: z.enum(['show', 'clear']).default('show'),
-      ref: z.string().optional(),
-      selector: z.string().optional(),
-      text: z.string().optional(),
-      all: z.boolean().optional(),
-      color: z.string().optional(),
-      durationMs: z.number().int().min(0).max(60000).optional()
-    }
-  }, async (args) => {
-    const result = await bridge.request('highlight', args, { timeout: 15000 });
-    if (args.action === 'clear') return textResult('Highlights cleared.');
-    return textResult(`Highlighted ${result.highlighted} element(s) for ${result.durationMs}ms.`);
   });
 
   register('drag', {

@@ -292,8 +292,45 @@ export async function pressKey(tabId, combo, options = {}) {
 }
 
 export async function typeText(tabId, text, options = {}) {
-  const delay = Math.max(0, Math.min(Number(options.delay) || 0, 1000));
   const value = String(text == null ? '' : text);
+  const natural = options.natural !== false;
+
+  // natural=true (default): use Input.insertText character by character
+  // with a realistic human typing cadence without DOM manipulation.
+  if (natural) {
+    let typed = 0;
+    const len = value.length;
+    // Cadence: fast human typing (~45 wpm), scaling down for longer text
+    const baseDelay = options.delay != null
+      ? Math.max(0, Number(options.delay))
+      : (len > 200 ? 4 : len > 80 ? 12 : 24);
+
+    for (const ch of value) {
+      if (ch === '\n' || ch === '\r') {
+        await pressKey(tabId, 'Enter');
+      } else if (ch === '\t') {
+        await pressKey(tabId, 'Tab');
+      } else {
+        await send(tabId, 'Input.insertText', { text: ch });
+        if (baseDelay > 0) {
+          const jitter = Math.floor(Math.random() * (baseDelay * 0.6));
+          await new Promise((resolve) => setTimeout(resolve, baseDelay + jitter));
+        }
+      }
+      typed++;
+    }
+    return { typed, length: value.length, via: 'insertText+natural' };
+  }
+
+  const delay = Math.max(0, Math.min(Number(options.delay) || 0, 1000));
+
+  // Fast path: use insertText for plain text (no special chars), key events
+  // only for newlines/tabs. Much cheaper than char-by-char dispatch.
+  if (!delay && !value.includes('\n') && !value.includes('\t') && !value.includes('\r')) {
+    await send(tabId, 'Input.insertText', { text: value });
+    return { typed: value.length, length: value.length, via: 'insertText' };
+  }
+
   let typed = 0;
   for (const ch of value) {
     const def = charKeyDef(ch);
@@ -310,7 +347,7 @@ export async function typeText(tabId, text, options = {}) {
     typed++;
     if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
   }
-  return { typed, length: value.length };
+  return { typed, length: value.length, via: 'keyEvents' };
 }
 
 export async function mouseWheel(tabId, options = {}) {
@@ -559,4 +596,169 @@ export async function emulate(tabId, options = {}) {
     };
   }
   return applied;
+}
+
+// ---------------------------------------------------------------------------
+// Visual cursor overlay — a visible SVG cursor rendered inside the page via
+// CDP Runtime evaluation. Each tab gets its own cursor element so the model
+// can show exactly where it is about to click.
+// ---------------------------------------------------------------------------
+
+const CURSOR_INIT = `(() => {
+  const ID = '__oc_cursor__';
+  let d = document.getElementById(ID);
+  if (d) {
+    d.style.display = 'block';
+    return;
+  }
+  d = document.createElement('div');
+  d.id = ID;
+  // Outer wrapper: handles position, does not clip the glow
+  d.style.cssText = [
+    'position:fixed',
+    'top:0','left:0',
+    'width:0','height:0',       // zero size — contents use overflow
+    'overflow:visible',
+    'pointer-events:none',
+    'z-index:2147483647',
+    'display:block',
+    'transform:translate(100px,100px)',
+    'transition:transform 0.08s ease-out',
+    'will-change:transform'
+  ].join(';');
+  // Hot-orange arrow with thick dark outline + drop-shadow glow
+  // SVG viewBox origin at (0,0) = tip of the arrow
+  d.innerHTML = \`<svg width="28" height="32" viewBox="-4 -4 28 36"
+      xmlns="http://www.w3.org/2000/svg"
+      style="display:block;pointer-events:none;overflow:visible">
+    <defs>
+      <filter id="oc-glow" x="-60%" y="-60%" width="220%" height="220%">
+        <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#ff6a00" flood-opacity="0.9"/>
+        <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#ff6a00" flood-opacity="0.5"/>
+      </filter>
+    </defs>
+    <!-- thick dark outline for contrast on any background -->
+    <path d="M0 0 L0 20 L5.5 14.5 L9.5 23 L13 21.5 L9 13 L16 13 Z"
+          fill="#1a0a00" stroke="#1a0a00" stroke-width="4"
+          stroke-linejoin="round" stroke-linecap="round"/>
+    <!-- vivid orange fill -->
+    <path d="M0 0 L0 20 L5.5 14.5 L9.5 23 L13 21.5 L9 13 L16 13 Z"
+          fill="#ff6a00" stroke="#ffb347" stroke-width="1"
+          stroke-linejoin="round" filter="url(#oc-glow)"/>
+    <!-- white hot-spot dot at tip -->
+    <circle cx="0" cy="0" r="2" fill="white" opacity="0.9"/>
+  </svg>\`;
+  document.documentElement.appendChild(d);
+})()`;
+
+export async function ensureCursor(tabId) {
+  // 1. If CDP is attached, run via CDP Runtime.evaluate
+  if (attached.has(tabId)) {
+    try {
+      await send(tabId, 'Runtime.evaluate', { expression: CURSOR_INIT, returnByValue: true, awaitPromise: false });
+      return;
+    } catch {}
+  }
+  // 2. Otherwise inject directly into the DOM via chrome.scripting (does not require CDP attachment!)
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const ID = '__oc_cursor__';
+        let d = document.getElementById(ID);
+        if (d) {
+          d.style.display = 'block';
+          return;
+        }
+        d = document.createElement('div');
+        d.id = ID;
+        d.style.cssText = [
+          'position:fixed',
+          'top:0','left:0',
+          'width:0','height:0',
+          'overflow:visible',
+          'pointer-events:none',
+          'z-index:2147483647',
+          'display:block',
+          'transform:translate(100px,100px)',
+          'transition:transform 0.08s ease-out',
+          'will-change:transform'
+        ].join(';');
+        d.innerHTML = '<svg width="28" height="32" viewBox="-4 -4 28 36" xmlns="http://www.w3.org/2000/svg" style="display:block;pointer-events:none;overflow:visible">'
+          + '<defs>'
+          + '<filter id="oc-glow" x="-60%" y="-60%" width="220%" height="220%">'
+          + '<feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#ff6a00" flood-opacity="0.9"/>'
+          + '<feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#ff6a00" flood-opacity="0.5"/>'
+          + '</filter>'
+          + '</defs>'
+          + '<path d="M0 0 L0 20 L5.5 14.5 L9.5 23 L13 21.5 L9 13 L16 13 Z" fill="#1a0a00" stroke="#1a0a00" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>'
+          + '<path d="M0 0 L0 20 L5.5 14.5 L9.5 23 L13 21.5 L9 13 L16 13 Z" fill="#ff6a00" stroke="#ffb347" stroke-width="1" stroke-linejoin="round" filter="url(#oc-glow)"/>'
+          + '<circle cx="0" cy="0" r="2" fill="white" opacity="0.9"/>'
+          + '</svg>';
+        document.documentElement.appendChild(d);
+      }
+    });
+  } catch {
+    // Ignore restricted pages (chrome://, etc.)
+  }
+}
+
+export async function showCursor(tabId, x, y) {
+  await ensureCursor(tabId);
+  const nx = Math.round(Number(x) || 0);
+  const ny = Math.round(Number(y) || 0);
+  try {
+    await send(tabId, 'Runtime.evaluate', {
+      expression: `(() => { const e = document.getElementById('__oc_cursor__'); if (e) { e.style.display='block'; e.style.transform='translate(${nx}px,${ny}px)'; } })()`,
+      returnByValue: true,
+      awaitPromise: false
+    });
+  } catch {
+    // Ignore — CSP or closed tab.
+  }
+  return { visible: true, x: nx, y: ny };
+}
+
+export async function hideCursor(tabId) {
+  try {
+    await send(tabId, 'Runtime.evaluate', {
+      expression: `(() => { const e = document.getElementById('__oc_cursor__'); if (e) e.style.display='none'; })()`,
+      returnByValue: true,
+      awaitPromise: false
+    });
+  } catch {
+    // Ignore.
+  }
+  return { visible: false };
+}
+
+export async function moveCursorTo(tabId, x, y, options = {}) {
+  const nx = Math.round(Number(x) || 0);
+  const ny = Math.round(Number(y) || 0);
+  await ensureCursor(tabId);
+  const animate = options.animate !== false;
+  if (animate) {
+    const from = mousePositions.get(tabId) || { x: 0, y: 0 };
+    const steps = Math.max(2, Math.min(Number(options.steps) || 6, 20));
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      const cx = Math.round(from.x + (nx - from.x) * eased);
+      const cy = Math.round(from.y + (ny - from.y) * eased);
+      try {
+        await send(tabId, 'Runtime.evaluate', {
+          expression: `(() => { const e = document.getElementById('__oc_cursor__'); if (e) { e.style.display='block'; e.style.transform='translate(${cx}px,${cy}px)'; } })()`,
+          returnByValue: true,
+          awaitPromise: false
+        });
+      } catch {
+        break;
+      }
+      if (i < steps) await new Promise((r) => setTimeout(r, 14));
+    }
+  } else {
+    await showCursor(tabId, nx, ny);
+  }
+  mousePositions.set(tabId, { x: nx, y: ny });
+  return { x: nx, y: ny };
 }

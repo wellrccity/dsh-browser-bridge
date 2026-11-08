@@ -1,184 +1,206 @@
-# Referência das ferramentas `chrome_*`
+# `chrome_*` Tool Reference
 
-Todas as ferramentas aceitam `tabId` quando fazem sentido. Em sessões com mais de uma janela ou aba, passe o `tabId` explicitamente. `timeout` é em milissegundos.
+All tools accept `tabId` when applicable. In sessions with more than one window or tab, pass `tabId` explicitly. `timeout` is in milliseconds.
 
-## Sessão, abas e navegação
+## Session, Tabs, and Navigation
 
 ### `chrome_status`
 
-Sem argumentos. Retorna bridge, versão da extensão, conexão, aba ativa e lista de abas. Use sempre como primeira chamada.
+No arguments. Returns bridge, extension version, connection, active tab, and tab list. Always use as the first call.
 
 ### `chrome_tabs`
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
 | `action` | `list`, `new`, `activate`, `close`, `get`, `reload`, `duplicate`, `pin`, `mute`, `unmute` |
-| `tabId` | Alvo; padrão é a aba ativa |
-| `url` | Para `new` |
-| `active` | Para `new`: focar a aba |
-| `windowId` | Para `new` |
-| `waitUntil` | `none`, `commit`, `domcontentloaded` (padrão), `load`, `networkidle` |
+| `tabId` | Target; defaults to active tab |
+| `url` | For `new` |
+| `active` | For `new`: focus the tab |
+| `windowId` | For `new` |
+| `waitUntil` | `none`, `commit`, `domcontentloaded` (default), `load`, `networkidle` |
 | `timeout` | 1000–120000 |
-| `bypassCache` | Para `reload` |
-| `pinned` | Para `new` |
+| `bypassCache` | For `reload` |
+| `pinned` | For `new` |
 
 ### `chrome_navigate`
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
-| `action` | `goto` (padrão), `back`, `forward`, `reload`, `stop` |
-| `url` | Obrigatório em `goto`; domínio sem esquema vira `https://` |
-| `tabId` | Alvo |
-| `newTab` | Abrir em nova aba |
-| `active` | Focar a aba; padrão `true` |
-| `waitUntil` | `none`, `commit`, `domcontentloaded` (padrão), `load`, `networkidle` |
-| `timeout` | 1000–120000; padrão 30000 |
-| `bypassCache` | Recarregar ignorando cache |
+| `action` | `goto` (default), `back`, `forward`, `reload`, `stop` |
+| `url` | Required for `goto`; bare domain becomes `https://` |
+| `tabId` | Target |
+| `newTab` | Open in new tab |
+| `active` | Focus the tab; default `true` |
+| `waitUntil` | `none`, `commit`, `domcontentloaded` (default), `load`, `networkidle` |
+| `timeout` | 1000–120000; default 30000 |
+| `bypassCache` | Reload ignoring cache |
 
 ### `chrome_debugger`
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
 | `action` | `status`, `attach`, `detach` |
-| `tabId` | Alvo |
+| `tabId` | Target |
 
-CDP habilita entrada confiável, screenshot de página inteira, `evaluate`, upload e emulação. O Chrome mostra uma faixa de depuração enquanto estiver anexado.
+CDP enables trusted input, full-page screenshot, `evaluate`, upload, and emulation. Chrome shows a debug banner while attached.
 
-## Leitura e inspeção
+## Reading and Inspection
+
+### `chrome_visual`
+
+Fast surface capture. Use this **first** before snapshot or DOM queries to understand the current visual state, see open modals/overlays/iframes, or verify a visual change.
+
+| Argument | Values / Notes |
+| --- | --- |
+| `tabId` | Target |
+| `fullPage` | Full scrollable page instead of viewport |
+| `textOnly` | Return a text summary of visible modals/overlays instead of an image. Best for non-vision models |
+| `quality` | 30–95 for JPEG; default 72 |
+| `maxWidth` | 200–2560 px; default 1280 |
+| `maxHeight` | 200–4000 px; default 900 |
+
+### `chrome_cursor`
+
+Single, primary tool for in-page navigation, pointing, hovering, and executing clicks. Moves the glowing orange cursor smoothly to the target element without needing manual coordinates.
+
+Target: `ref` (preferred), `selector`, `text` (visible text/accessible name), or `x` + `y`.
+
+| Argument | Values / Notes |
+| --- | --- |
+| `action` | `click` (default), `move`, `hover`, `show`, `hide` |
+| `tabId`, `frameId` | Target |
+| `ref` | Snapshot ref (e.g. `f0_e4`). Cursor moves automatically to element center |
+| `selector` | CSS selector. Cursor moves automatically to element center |
+| `text` | Visible text or accessible name to match. Moves automatically |
+| `exactText` | Require exact text match |
+| `x`, `y` | Direct viewport coordinates (optional fallback) |
+| `button` | `left` (default), `right`, `middle` (for `action="click"`) |
+| `clickCount` | 1–3 |
+| `modifiers` | `Alt`, `Control`, `Meta`, `Shift`, `Option`, `Command` |
+| `trusted` | `true` = real CDP input; `false` = DOM events |
+| `animate` | Animate cursor movement; default `true` |
+| `steps` | 1–30 animation steps; default 6 |
+| `human` | Human-like mouse movement; default `false` (faster) |
+| `waitUntil` | Load state after navigation; default `domcontentloaded` |
+| `detectNavigationMs` | 100–5000; default 700 |
+| `switchToNewTab` | Activate tab opened by the click |
+| `delayAfter` | 0–5000 ms |
+| `timeout` | 1000–120000; default 30000 |
 
 ### `chrome_snapshot`
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
-| `tabId` | Alvo |
-| `frameId` | Frame; padrão 0 ou o frame codificado na ref |
-| `allFrames` | Incluir iframes |
-| `selector` | Restringir a uma subárvore |
-| `mode` | `interactive` (padrão) ou `full` |
-| `maxNodes` | 20–2000; padrão 400 |
-| `maxDepth` | 3–80; padrão 24 |
-| `includeHidden` | Incluir elementos ocultos |
-| `includeBboxes` | Incluir caixas delimitadoras |
-| `timeout` | 1000–120000; padrão 20000 |
+| `tabId` | Target |
+| `frameId` | Frame; default 0 or the frame encoded in the ref |
+| `allFrames` | Include iframes |
+| `selector` | Restrict to a subtree |
+| `mode` | `interactive` (default) or `full` |
+| `maxNodes` | 20–2000; default 400 |
+| `maxDepth` | 3–80; default 24 |
+| `includeHidden` | Include hidden elements |
+| `includeBboxes` | Include bounding boxes |
+| `timeout` | 1000–120000; default 20000 |
 
-As refs têm o formato `f<frame>_e<n>`, por exemplo `f0_e12`.
+Refs have the format `f<frame>_e<n>`, e.g., `f0_e12`.
 
 ### `chrome_screenshot`
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
-| `tabId`, `frameId` | Alvo |
-| `fullPage` | Página inteira |
-| `ref` ou `selector` | Capturar um elemento (não use os dois) |
-| `annotate` | Desenhar refs como caixas rotuladas |
-| `grid` | Grade de 100 px |
-| `format` | `png` (padrão) ou `jpeg` |
-| `quality` | 1–100 para JPEG |
+| `tabId`, `frameId` | Target |
+| `fullPage` | Full page |
+| `ref` or `selector` | Capture an element (do not use both) |
+| `annotate` | Draw refs as labeled boxes |
+| `grid` | 100 px grid |
+| `format` | `png` (default) or `jpeg` |
+| `quality` | 1–100 for JPEG |
 | `maxWidth` | 200–6000 |
 | `maxHeight` | 200–12000 |
-| `trusted` | Forçar CDP on/off |
-| `timeout` | 1000–180000; padrão 60000 |
+| `trusted` | Force CDP on/off |
+| `timeout` | 1000–180000; default 60000 |
 
 ### `chrome_dom`
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
 | `action` | `query`, `html`, `text`, `attributes`, `styles`, `rect`, `count` |
-| `selector` | CSS; suporta shadow DOM aberto com `host >>> interno` |
-| `ref` | Ref do snapshot |
-| `xpath` | Alternativa ao CSS |
-| `all` | Todos os matches |
+| `selector` | CSS; supports open shadow DOM with `host >>> internal` |
+| `ref` | Snapshot ref |
+| `xpath` | Alternative to CSS |
+| `all` | All matches |
 | `limit` | 1–100 |
-| `includeHtml` | Incluir HTML no resultado de query |
+| `includeHtml` | Include HTML in query result |
 | `maxLength` | 100–30000 |
-| `properties` | Lista de propriedades CSS para `styles` |
-| `timeout` | 1000–60000; padrão 10000 |
+| `properties` | List of CSS properties for `styles` |
+| `timeout` | 1000–60000; default 10000 |
 
 ### `chrome_evaluate`
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
-| `expression` | JavaScript; use IIFE para várias instruções |
+| `expression` | JavaScript; use IIFE for multiple statements |
 | `frameId` | Frame |
-| `awaitPromise` | Esperar Promise; padrão `true` |
-| `returnByValue` | Retornar JSON; padrão `true` |
-| `userGesture` | Simular gesto do usuário; padrão `true` |
-| `trusted` | Usar CDP |
+| `awaitPromise` | Wait for Promise; default `true` |
+| `returnByValue` | Return JSON; default `true` |
+| `userGesture` | Simulate user gesture; default `true` |
+| `trusted` | Use CDP |
 
-Exemplo: `(() => ({ title: document.title, links: [...document.querySelectorAll('a')].length }))()`.
+Example: `(() => ({ title: document.title, links: [...document.querySelectorAll('a')].length }))()`.
 
-## Interação
+## Interaction
 
-### `chrome_click`
-
-Alvo: `ref` (preferido), `selector`, `text` (texto visível/nome acessível) ou `x` + `y`.
-
-| Argumento | Valores / observação |
-| --- | --- |
-| `exactText` | Exigir texto exato |
-| `button` | `left` (padrão), `right`, `middle` |
-| `clickCount` | 1–3 |
-| `modifiers` | `Alt`, `Control`, `Meta`, `Shift`, `Option`, `Command` |
-| `trusted` | `true` = CDP; `false` = eventos DOM |
-| `human` | Movimento de mouse humanizado; padrão `false` (mais rápido). Use `true` só quando o site exigir |
-| `waitUntil` | Estado de carga após navegação; padrão `domcontentloaded` |
-| `timeout` | 1000–120000; padrão 30000 |
-| `detectNavigationMs` | 100–5000; padrão 700 |
-| `switchToNewTab` | Ativar aba aberta pelo clique |
-| `delayAfter` | 0–5000 ms |
+Use `chrome_cursor` (default action `click`) for all pointing, clicks, and hovers.
 
 ### `chrome_type`
 
-Alvo: `ref`, `selector` ou `focused`.
+Target: `ref`, `selector`, or `focused`.
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
-| `text` | Obrigatório |
-| `clear` | Limpar antes; padrão `true` |
-| `delay` | 0–1000 ms por caractere |
-| `pressEnter` | Enviar Enter no final |
-| `trusted` | CDP por padrão |
-| `waitUntil` | Estado de carga após Enter; padrão `domcontentloaded` |
-| `timeout` | 1000–120000; padrão 30000 |
+| `text` | Required |
+| `clear` | Clear before; default `true` |
+| `delay` | 0–1000 ms per character |
+| `natural` | `true` uses `Input.insertText` for fast realistic typing without DOM manipulation. Best for React/Vue/Angular inputs and long text |
+| `pressEnter` | Send Enter at the end |
+| `trusted` | CDP by default |
+| `waitUntil` | Load state after Enter; default `domcontentloaded` |
+| `timeout` | 1000–120000; default 30000 |
 | `delayAfter` | 0–5000 ms |
 
-Texto vazio + `pressEnter` em um botão focado funciona como clique; prefira `chrome_click` quando disponível.
+Empty text + `pressEnter` on a focused button works as a click; prefer `chrome_cursor` when available.
 
 ### `chrome_press`
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
-| `ref` / `selector` | Focar o elemento antes |
-| `key` | `Enter` (padrão), `Tab`, `Escape`, `Backspace`, `ArrowDown`, `Control+A`, `Shift+Enter`, `F5`... |
-| `trusted` | CDP por padrão |
+| `ref` / `selector` | Focus the element first |
+| `key` | `Enter` (default), `Tab`, `Escape`, `Backspace`, `ArrowDown`, `Control+A`, `Shift+Enter`, `F5`... |
+| `trusted` | CDP by default |
 | `delay` | 0–2000 ms |
-| `noSubmit` | Não enviar formulário ao pressionar Enter |
-| `waitUntil` | Estado de carga; padrão `domcontentloaded` |
+| `noSubmit` | Do not submit form on Enter |
+| `waitUntil` | Load state; default `domcontentloaded` |
 | `timeout` | 1000–120000 |
-
-### `chrome_hover`
-
-Alvo: `ref`, `selector` ou `text`. Opções: `trusted`, `durationMs` (0–10000), `steps` (1–80), `duration` (0–3000 ms de movimento).
 
 ### `chrome_select`
 
-Alvo: `ref` ou `selector`. Escolha por `value`, `values`, `label`, `labels`, `index` ou `indexes`. Para dropdowns customizados, clique no gatilho e depois na opção com `chrome_click`.
+Target: `ref` or `selector`. Choose by `value`, `values`, `label`, `labels`, `index`, or `indexes`. For custom dropdowns, click the trigger then the option with `chrome_cursor`.
 
 ### `chrome_scroll`
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
-| `direction` | `up`, `down` (padrão), `left`, `right` |
-| `amount` | 50–10000; padrão 600 |
-| `to` | `top` ou `bottom` |
-| `ref` / `selector` | Trazer elemento à vista |
-| `containerRef` / `containerSelector` | Rolar um container |
-| `smooth` | Rolagem suave; padrão `false` (instantânea) |
+| `direction` | `up`, `down` (default), `left`, `right` |
+| `amount` | 50–10000; default 600 |
+| `to` | `top` or `bottom` |
+| `ref` / `selector` | Bring element into view |
+| `containerRef` / `containerSelector` | Scroll a container |
+| `smooth` | Smooth scroll; default `false` (instant) |
 | `trusted` | Wheel via CDP |
 
 ### `chrome_drag`
 
-Origem: `fromRef`, `fromSelector` ou `fromX` + `fromY`. Destino: `toRef`, `toSelector` ou `toX` + `toY`. Opções: `steps` (2–80), `duration` (0–3000), `trusted`.
+Source: `fromRef`, `fromSelector`, or `fromX` + `fromY`. Destination: `toRef`, `toSelector`, or `toX` + `toY`. Options: `steps` (2–80), `duration` (0–3000), `trusted`.
 
 ### `chrome_fill_form`
 
@@ -195,101 +217,91 @@ Origem: `fromRef`, `fromSelector` ou `fromX` + `fromY`. Destino: `toRef`, `toSel
 }
 ```
 
-Cada campo aceita `ref`/`selector`, `value`, `text`, `type` (`text`, `select`, `checkbox`, `radio`), `checked`, `values`, `label`, `index`, `clear`, `delay`, `pressEnter` e `frameId`. Opções gerais: `trusted`, `continueOnError`, `timeout`.
+Each field accepts `ref`/`selector`, `value`, `text`, `type` (`text`, `select`, `checkbox`, `radio`), `checked`, `values`, `label`, `index`, `clear`, `delay`, `pressEnter`, and `frameId`. General options: `trusted`, `continueOnError`, `timeout`.
 
 ### `chrome_upload_file`
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
 | `ref` / `selector` | `<input type="file">` |
-| `files` | Lista de caminhos absolutos na máquina que roda o Chrome |
-| `frameId` | Frame do input |
+| `files` | List of absolute paths on the machine running Chrome |
+| `frameId` | Frame of the input |
 
-Requer CDP e o frame principal.
+Requires CDP and the main frame.
 
-## Espera e observação
+## Waiting and Observation
 
 ### `chrome_wait_for`
 
-Informe pelo menos uma condição: `selector`, `text`, `urlIncludes`, `urlMatches`, `js` ou `loadState`.
+Provide at least one condition: `selector`, `text`, `urlIncludes`, `urlMatches`, `js`, or `loadState`.
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
-| `state` | `visible` (padrão), `attached`, `hidden`, `detached` |
-| `exact` | Texto exato |
-| `urlMatches` | Fonte de regex JavaScript |
-| `js` | Expressão/predicado |
+| `state` | `visible` (default), `attached`, `hidden`, `detached` |
+| `exact` | Exact text match |
+| `urlMatches` | JavaScript regex source |
+| `js` | Expression/predicate |
 | `loadState` | `commit`, `domcontentloaded`, `load`, `networkidle` |
-| `timeout` | 100–120000; padrão 10000 |
-| `interval` | 50–2000 ms; padrão 200 |
-| `trusted` | Usar CDP |
+| `timeout` | 100–120000; default 10000 |
+| `interval` | 50–2000 ms; default 200 |
+| `trusted` | Use CDP |
 
 ### `chrome_console`
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
-| `action` | `get` (padrão) ou `clear` |
+| `action` | `get` (default) or `clear` |
 | `level` | `log`, `info`, `warn`, `error`, `debug` |
-| `limit` | 1–400; padrão 200 |
+| `limit` | 1–400; default 200 |
 
 ### `chrome_network`
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
-| `action` | `get` (padrão) ou `clear` |
-| `filter` | Trecho da URL |
-| `type` | `fetch`, `xmlhttprequest`, `image` etc. |
-| `status` | Código HTTP |
-| `includeStatic` | Incluir scripts/imagens/cache |
-| `limit` | 1–400; padrão 200 |
+| `action` | `get` (default) or `clear` |
+| `filter` | URL substring |
+| `type` | `fetch`, `xmlhttprequest`, `image`, etc. |
+| `status` | HTTP status code |
+| `includeStatic` | Include scripts/images/cache |
+| `limit` | 1–400; default 200 |
 
-## Estado e ambiente
+## State and Environment
 
 ### `chrome_cookies`
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
-| `action` | `get` (padrão), `set`, `delete`, `clear` |
-| `url` / `domain` | Obrigatório para leitura/limpeza; `url` recomendado |
-| `name` | Nome exato; use para leitura focada |
-| `value` | Para `set` |
-| `path` | Padrão `/` no `set` |
-| `secure`, `httpOnly`, `sameSite` | Atributos do cookie |
-| `expirationDate` | Timestamp Unix em segundos |
-| `storeId` | Store de cookies |
+| `action` | `get` (default), `set`, `delete`, `clear` |
+| `url` / `domain` | Required for read/clear; `url` recommended |
+| `name` | Exact name; use for focused read |
+| `value` | For `set` |
+| `path` | Default `/` in `set` |
+| `secure`, `httpOnly`, `sameSite` | Cookie attributes |
+| `expirationDate` | Unix timestamp in seconds |
+| `storeId` | Cookie store |
 
 ### `chrome_dialog`
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
 | `action` | `status`, `set_policy`, `clear` |
-| `intercept` | Ligar/desligar interceptação |
-| `confirm` | Resposta automática para `confirm()` |
-| `prompt` | Texto retornado por `prompt()` |
-
-### `chrome_highlight`
-
-| Argumento | Valores / observação |
-| --- | --- |
-| `action` | `show` (padrão), `clear` |
-| `ref` / `selector` / `text` | Alvo |
-| `all` | Destacar todos os elementos com refs |
-| `color` | Cor do contorno |
-| `durationMs` | 0–60000 |
+| `intercept` | Enable/disable interception |
+| `confirm` | Auto-answer for `confirm()` |
+| `prompt` | Text returned by `prompt()` |
 
 ### `chrome_emulate`
 
-| Argumento | Valores / observação |
+| Argument | Values / Notes |
 | --- | --- |
-| `action` | `set` (padrão), `reset` |
+| `action` | `set` (default), `reset` |
 | `width`, `height` | 200–10000 |
 | `deviceScaleFactor` | 0.5–4 |
-| `mobile` | Emular mobile |
+| `mobile` | Emulate mobile |
 | `userAgent` | String |
-| `latitude`, `longitude`, `accuracy` | Geolocalização |
+| `latitude`, `longitude`, `accuracy` | Geolocation |
 | `colorScheme` | `light`, `dark` |
-| `timezone` | Ex.: `America/Sao_Paulo` |
-| `offline` | Modo offline |
-| `latency`, `downloadThroughput`, `uploadThroughput` | Rede |
+| `timezone` | e.g., `America/Sao_Paulo` |
+| `offline` | Offline mode |
+| `latency`, `downloadThroughput`, `uploadThroughput` | Network |
 
-Requer CDP. Use `reset` para limpar todos os overrides.
+Requires CDP. Use `reset` to clear all overrides.

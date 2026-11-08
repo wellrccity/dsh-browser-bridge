@@ -3,7 +3,7 @@ node_modules/
 .DS_Store
 Thumbs.db
 
-# Pastas locais de dados/trabalho (não fazem parte do projeto)
+# Local data/work folders (not part of the project)
 kaggle-s6e10/
 titanic/
 __pycache__/

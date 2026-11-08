@@ -90,6 +90,13 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   cdp.detach(tabId).catch(() => {});
 });
 
+// Auto-inject and show the glowing cursor whenever a page completes loading while connected
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (wsState === 'connected' && changeInfo.status === 'complete' && tab && isScriptableUrl(tab.url)) {
+    cdp.ensureCursor(tabId).catch(() => {});
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== 'string') return false;
 
@@ -205,6 +212,10 @@ function connect() {
         }
       });
       broadcastStatus();
+      // Auto-load cursor on the active tab as soon as MCP connects
+      getActiveTab().then((tab) => {
+        if (tab && isScriptableUrl(tab.url)) cdp.ensureCursor(tab.id).catch(() => {});
+      }).catch(() => {});
       if (!settled) {
         settled = true;
         resolve();
@@ -319,6 +330,10 @@ function handleSocketMessage(raw) {
 
 async function handleServerRequest(message) {
   const started = Date.now();
+  // Ensure the glowing cursor is active on the tab as soon as any MCP command is triggered
+  getActiveTab().then((tab) => {
+    if (tab && isScriptableUrl(tab.url)) cdp.ensureCursor(tab.id).catch(() => {});
+  }).catch(() => {});
   try {
     const result = await handleCommand(message.method, message.params || {});
     send({
@@ -454,16 +469,22 @@ async function getActiveTab() {
 }
 
 async function resolveTab(params = {}) {
+  let tab;
   if (params.tabId != null) {
     try {
-      return await chrome.tabs.get(Number(params.tabId));
+      tab = await chrome.tabs.get(Number(params.tabId));
     } catch {
       throw new Error(`Tab ${params.tabId} was not found.`);
     }
+  } else {
+    tab = await getActiveTab();
+    if (!tab) {
+      throw new Error('No Chrome tab is available. Use chrome_navigate with newTab=true to create one.');
+    }
   }
-  const tab = await getActiveTab();
-  if (!tab) {
-    throw new Error('No Chrome tab is available. Use chrome_navigate with newTab=true to create one.');
+  // Auto-ensure the glowing cursor is loaded on any tab commanded by MCP
+  if (tab && isScriptableUrl(tab.url)) {
+    cdp.ensureCursor(tab.id).catch(() => {});
   }
   return tab;
 }
@@ -699,6 +720,8 @@ async function waitForReady(tabId, waitUntil = 'domcontentloaded', timeout = 300
   }
   await waitForTabStatus(tabId, 'complete', timeout);
   await waitForReadyState(tabId, 'complete', Math.min(timeout, 10000)).catch(() => {});
+  // Auto-inject cursor on newly navigated page
+  cdp.ensureCursor(tabId).catch(() => {});
 }
 
 async function waitForPossibleNavigation(tabId, beforeUrl, params = {}) {
@@ -781,6 +804,10 @@ async function waitForPossibleNavigation(tabId, beforeUrl, params = {}) {
 
 async function handleCommand(method, params) {
   switch (method) {
+    case 'visual':
+      return handleVisual(params);
+    case 'cursor':
+      return handleCursor(params);
     case 'status':
       return getStatus();
     case 'tabs':
@@ -827,6 +854,9 @@ async function handleCommand(method, params) {
       return handleDrag(params);
     case 'emulate':
       return handleEmulate(params);
+    case 'reloadExtension':
+      setTimeout(() => chrome.runtime.reload(), 100);
+      return { reloading: true };
     case 'debugger':
       return handleDebugger(params);
     case 'ping':
@@ -1280,13 +1310,117 @@ function bytesToBase64(bytes) {
   return btoa(binary);
 }
 
-async function handleClick(params = {}) {
+async function handleVisual(params = {}) {
   const tab = await resolveTab(params);
-  const frameId = params.frameId != null ? Number(params.frameId) : frameFromRef(params.ref) || 0;
-  const beforeUrl = tab.url;
-  let target = null;
-  let via = 'dom';
+
+  // Surface text inspection — for text-only models or when textOnly=true.
+  // Gathers open dialogs, modals, floating overlays and visible iframes
+  // without sending a full DOM or heavy accessibility tree.
+  let surfaceText = null;
+  try {
+    surfaceText = await execMain(tab.id, 0, () => {
+      const surface = [];
+      // 1. Native dialog elements
+      for (const d of document.querySelectorAll('dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]')) {
+        const title = d.querySelector('h1, h2, h3, [class*="title"]') || d;
+        const btn = Array.from(d.querySelectorAll('button, a[role="button"]')).map(b => b.textContent?.trim()).filter(Boolean).slice(0, 4);
+        surface.push(`[MODAL/DIALOG] "${title.textContent?.trim()?.slice(0, 60)}" buttons: [${btn.join(', ')}]`);
+      }
+      // 2. Fixed/sticky high z-index overlays
+      for (const el of document.querySelectorAll('*')) {
+        const style = window.getComputedStyle(el);
+        const z = parseInt(style.zIndex, 10);
+        if ((style.position === 'fixed' || style.position === 'sticky') && z > 100 && el.offsetHeight > 40 && el.offsetWidth > 100) {
+          const text = el.textContent?.trim().slice(0, 80);
+          if (text && !surface.some(s => s.includes(text.slice(0, 30)))) {
+            surface.push(`[OVERLAY z=${z}] "${text}"`);
+          }
+        }
+      }
+      // 3. Visible iframes
+      for (const f of document.querySelectorAll('iframe')) {
+        const rect = f.getBoundingClientRect();
+        if (rect.width > 50 && rect.height > 50) {
+          surface.push(`[IFRAME] src="${f.src?.slice(0, 60)}" (${Math.round(rect.width)}x${Math.round(rect.height)}px at ${Math.round(rect.top)},${Math.round(rect.left)})`);
+        }
+      }
+      return surface.length ? surface.join('\n') : 'Page surface is clear (no modals, floating dialogs, or prominent overlays detected).';
+    });
+  } catch {
+    surfaceText = null;
+  }
+
+  // If text-only mode requested, return text summary immediately (zero image tokens)
+  if (params.textOnly) {
+    return {
+      tab: tabInfo(tab),
+      textOnly: true,
+      surface: surfaceText
+    };
+  }
+
+  const useCdp = shouldUseCdp(params);
+  let shot = null;
   let fallbackReason = null;
+
+  if (useCdp) {
+    try {
+      shot = await cdp.captureScreenshot(tab.id, {
+        format: 'jpeg',
+        quality: params.quality || 72,
+        fullPage: !!params.fullPage
+      });
+    } catch (error) {
+      fallbackReason = errorMessage(error);
+    }
+  }
+
+  if (!shot) {
+    const dataUrl = await captureVisibleTab(tab);
+    shot = { base64: dataUrlToBase64(dataUrl), mimeType: 'image/png' };
+    if (!fallbackReason) fallbackReason = 'CDP not available; captured visible viewport.';
+  }
+
+  const processed = await processScreenshot({
+    base64: shot.base64,
+    mimeType: shot.mimeType,
+    rects: [],
+    originX: 0,
+    originY: 0,
+    cssWidth: 0,
+    cssHeight: 0,
+    annotate: false,
+    grid: false,
+    maxWidth: params.maxWidth || 1280,
+    maxHeight: params.maxHeight || 900,
+    format: 'jpeg',
+    quality: params.quality || 72
+  });
+
+  return {
+    tab: tabInfo(tab),
+    image: processed,
+    width: processed.width,
+    height: processed.height,
+    fullPage: !!params.fullPage,
+    surface: surfaceText,
+    fallbackReason
+  };
+}
+
+async function handleCursor(params = {}) {
+  const tab = await resolveTab(params);
+  const action = String(params.action || (params.ref || params.selector || params.text || (params.x != null && params.y != null) ? 'click' : 'move')).toLowerCase();
+
+  if (action === 'hide') {
+    const result = await cdp.hideCursor(tab.id).catch(() => ({ visible: false }));
+    return { action: 'hide', visible: false, tab: tabInfo(tab) };
+  }
+
+  const frameId = params.frameId != null ? Number(params.frameId) : frameFromRef(params.ref) || 0;
+  let target = null;
+  let x = null;
+  let y = null;
 
   if (params.ref || params.selector || params.text) {
     await execInFrame(tab.id, frameId, 'scroll', {
@@ -1302,57 +1436,151 @@ async function handleClick(params = {}) {
       text: params.text,
       exactText: params.exactText
     }, { timeout: 6000 });
+    x = Math.round(target.rect.x + target.rect.width / 2);
+    y = Math.round(target.rect.y + target.rect.height / 2);
+  } else if (params.x != null && params.y != null) {
+    x = Math.round(Number(params.x));
+    y = Math.round(Number(params.y));
+  } else {
+    throw new Error('Provide ref, selector, text, or x/y coordinates for cursor.');
   }
 
-  if (shouldUseCdp(params) && frameId === 0 && (target || (params.x != null && params.y != null))) {
-    try {
-      const x = params.x != null ? Number(params.x) : target.rect.x + target.rect.width / 2;
-      const y = params.y != null ? Number(params.y) : target.rect.y + target.rect.height / 2;
-      await cdp.clickMouse(tab.id, x, y, {
-        button: params.button,
-        clickCount: params.clickCount,
-        modifiers: params.modifiers,
-        human: params.human === true
-      });
-      via = 'cdp';
-    } catch (error) {
-      fallbackReason = errorMessage(error);
-    }
+  // 1. Move the glowing cursor visibly to (x, y)
+  if (action === 'show') {
+    await cdp.showCursor(tab.id, x, y).catch(() => {});
+  } else {
+    await cdp.moveCursorTo(tab.id, x, y, {
+      animate: params.animate !== false,
+      steps: params.steps
+    }).catch(() => {});
   }
 
-  if (via !== 'cdp') {
-    try {
-      const result = await execInFrame(tab.id, frameId, 'click', params, {
-        timeout: Number(params.timeout) || 12000,
-        navigation: true
-      });
-      target = target || {
-        ref: result.ref,
-        tag: result.tag,
-        role: result.role,
-        name: result.name,
-        rect: { x: result.x, y: result.y, width: 0, height: 0 }
+  // 2. Inspect element under cursor (for non-vision models)
+  let elementUnderCursor = null;
+  try {
+    elementUnderCursor = await execMain(tab.id, 0, (cx, cy) => {
+      const c = document.getElementById('__oc_cursor__');
+      if (c) c.style.visibility = 'hidden';
+      const el = document.elementFromPoint(cx, cy);
+      if (c) c.style.visibility = 'visible';
+      if (!el) return null;
+      return {
+        tag: el.tagName.toLowerCase(),
+        role: el.getAttribute('role') || undefined,
+        text: el.textContent?.trim().slice(0, 60) || undefined,
+        type: el.getAttribute('type') || undefined,
+        href: el.getAttribute('href') || undefined,
+        ariaLabel: el.getAttribute('aria-label') || undefined
       };
-    } catch (error) {
-      if (error && error.code === 'FRAME_LOST') {
-        via = 'dom+navigation';
-      } else {
-        throw error;
+    }, [x, y]);
+  } catch {
+    elementUnderCursor = null;
+  }
+
+  // 3. Execute requested action
+  if (action === 'move' || action === 'show') {
+    return {
+      action,
+      visible: true,
+      x, y,
+      target: target || elementUnderCursor,
+      elementUnderCursor,
+      tab: tabInfo(tab)
+    };
+  }
+
+  if (action === 'hover') {
+    let via = 'dom';
+    let fallbackReason = null;
+    if (shouldUseCdp(params) && frameId === 0) {
+      try {
+        await cdp.moveMouse(tab.id, x, y, { steps: params.steps, duration: params.duration });
+        via = 'cdp';
+      } catch (e) {
+        fallbackReason = errorMessage(e);
       }
     }
+    if (via !== 'cdp') {
+      await execInFrame(tab.id, frameId, 'hover', params, { timeout: 6000 });
+    }
+    if (params.durationMs) await sleep(Math.max(0, Math.min(Number(params.durationMs) || 0, 10000)));
+    return {
+      action: 'hover',
+      hovered: true,
+      via,
+      x, y,
+      target: target || elementUnderCursor,
+      elementUnderCursor,
+      fallbackReason,
+      tab: tabInfo(tab)
+    };
   }
 
-  if (params.delayAfter) await sleep(Math.max(0, Math.min(Number(params.delayAfter) || 0, 5000)));
-  const navigation = await waitForPossibleNavigation(tab.id, beforeUrl, params);
+  if (action === 'click') {
+    const beforeUrl = tab.url;
+    let via = 'dom';
+    let fallbackReason = null;
+    if (shouldUseCdp(params) && frameId === 0) {
+      try {
+        await cdp.clickMouse(tab.id, x, y, {
+          button: params.button,
+          clickCount: params.clickCount,
+          modifiers: params.modifiers,
+          human: params.human === true
+        });
+        via = 'cdp';
+      } catch (error) {
+        fallbackReason = errorMessage(error);
+      }
+    }
 
-  return {
-    clicked: true,
-    via,
-    fallbackReason,
-    target,
-    tab: navigation.tab || tabInfo(await chrome.tabs.get(tab.id).catch(() => null)),
-    navigation
-  };
+    if (via !== 'cdp') {
+      try {
+        const result = await execInFrame(tab.id, frameId, 'click', params, {
+          timeout: Number(params.timeout) || 12000,
+          navigation: true
+        });
+        target = target || {
+          ref: result.ref,
+          tag: result.tag,
+          role: result.role,
+          name: result.name,
+          rect: { x: result.x, y: result.y, width: 0, height: 0 }
+        };
+      } catch (error) {
+        if (error && error.code === 'FRAME_LOST') {
+          via = 'dom+navigation';
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    if (params.delayAfter) await sleep(Math.max(0, Math.min(Number(params.delayAfter) || 0, 5000)));
+    const navigation = await waitForPossibleNavigation(tab.id, beforeUrl, params);
+
+    return {
+      action: 'click',
+      clicked: true,
+      via,
+      x, y,
+      fallbackReason,
+      target: target || elementUnderCursor,
+      elementUnderCursor,
+      tab: navigation.tab || tabInfo(await chrome.tabs.get(tab.id).catch(() => null)),
+      navigation
+    };
+  }
+
+  throw new Error(`Unknown cursor action: "${action}". Use "click", "move", "hover", "show", or "hide".`);
+}
+
+async function handleClick(params = {}) {
+  return handleCursor({ ...params, action: 'click' });
+}
+
+async function handleHover(params = {}) {
+  return handleCursor({ ...params, action: 'hover' });
 }
 
 function effectiveTypingDelay(params, trusted) {
@@ -1372,13 +1600,55 @@ async function handleType(params = {}) {
   let via = 'dom';
   let result = null;
   let fallbackReason = null;
+  let target = null;
 
+  // 1. Locate target element (by ref, selector, or currently focused element)
+  if (params.ref || params.selector) {
+    await execInFrame(tab.id, frameId, 'scroll', {
+      ref: params.ref,
+      selector: params.selector,
+      smooth: false
+    }, { timeout: 6000 }).catch(() => {});
+
+    try {
+      target = await execInFrame(tab.id, frameId, 'resolve', {
+        ref: params.ref,
+        selector: params.selector
+      }, { timeout: 6000 });
+    } catch {
+      target = null;
+    }
+  } else {
+    try {
+      const active = await execInFrame(tab.id, frameId, 'activeElement', {}, { timeout: 5000 });
+      if (active && active.rect) {
+        target = active;
+      }
+    } catch {
+      target = null;
+    }
+  }
+
+  // 2. Move cursor to the target element and click to activate it
+  if (target && target.rect && trusted) {
+    const x = Math.round(target.rect.x + target.rect.width / 2);
+    const y = Math.round(target.rect.y + target.rect.height / 2);
+    await cdp.moveCursorTo(tab.id, x, y, { animate: params.animate !== false, steps: params.steps || 6 }).catch(() => {});
+    await cdp.clickMouse(tab.id, x, y).catch(() => {});
+    await sleep(80);
+  } else if (target && !trusted) {
+    await execInFrame(tab.id, frameId, 'click', params, { timeout: 6000 }).catch(() => {});
+    await sleep(60);
+  }
+
+  // 3. Prepare field (clear, focus, validate) and execute natural typing
   if (trusted) {
     try {
       const prepared = await execInFrame(tab.id, frameId, 'prepareType', params, { timeout: 8000 });
       await cdp.attach(tab.id, 'type');
       const typed = await cdp.typeText(tab.id, params.text || '', {
-        delay: effectiveTypingDelay(params, true)
+        delay: params.delay,
+        natural: params.natural !== false
       });
       if (params.pressEnter) await cdp.pressKey(tab.id, 'Enter');
       const active = await execInFrame(tab.id, frameId, 'activeElement', {}, { timeout: 5000 }).catch(() => null);
@@ -1458,41 +1728,6 @@ async function handlePress(params = {}) {
     fallbackReason,
     navigation
   };
-}
-
-async function handleHover(params = {}) {
-  const tab = await resolveTab(params);
-  const frameId = params.frameId != null ? Number(params.frameId) : frameFromRef(params.ref) || 0;
-  await execInFrame(tab.id, frameId, 'scroll', {
-    ref: params.ref,
-    selector: params.selector,
-    text: params.text,
-    smooth: false
-  }, { timeout: 6000 }).catch(() => {});
-  const target = await execInFrame(tab.id, frameId, 'resolve', {
-    ref: params.ref,
-    selector: params.selector,
-    text: params.text
-  }, { timeout: 6000 });
-
-  let via = 'dom';
-  let fallbackReason = null;
-  if (shouldUseCdp(params) && frameId === 0) {
-    try {
-      await cdp.moveMouse(tab.id, target.rect.x + target.rect.width / 2, target.rect.y + target.rect.height / 2, {
-        steps: params.steps,
-        duration: params.duration
-      });
-      via = 'cdp';
-    } catch (error) {
-      fallbackReason = errorMessage(error);
-    }
-  }
-  if (via !== 'cdp') {
-    await execInFrame(tab.id, frameId, 'hover', params, { timeout: 6000 });
-  }
-  if (params.durationMs) await sleep(Math.max(0, Math.min(Number(params.durationMs) || 0, 10000)));
-  return { hovered: true, via, target, fallbackReason, tab: tabInfo(tab) };
 }
 
 async function handleSelect(params = {}) {

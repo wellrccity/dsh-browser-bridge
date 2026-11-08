@@ -315,6 +315,16 @@
     if (tag === 'fieldset') return 'group';
     if (tag === 'option') return 'option';
     if (el.isContentEditable) return 'textbox';
+    if (el.getAttribute('aria-modal') === 'true') return 'dialog';
+    const marker = `${el.id || ''} ${typeof el.className === 'string' ? el.className : ''}`.toLowerCase();
+    if (/(^|[-_\s])(modal|dialog|drawer|popover)([-_\s]|$)/.test(marker)) {
+      try {
+        const style = getComputedStyle(el);
+        if ((style.position === 'fixed' || style.position === 'sticky') && Number(style.zIndex) > 10) return 'dialog';
+      } catch {
+        // Ignore inaccessible styles.
+      }
+    }
     return 'generic';
   }
 
@@ -343,6 +353,23 @@
       if (tag === 'section' || tag === 'article' || tag === 'div' || tag === 'span') return !!name;
     }
     return false;
+  }
+
+  function isModalRoot(el) {
+    if (!el || !isVisible(el)) return false;
+    const role = roleOf(el);
+    if (el.tagName.toLowerCase() === 'dialog' || role === 'dialog' || el.getAttribute('aria-modal') === 'true') return true;
+    // A number of older UI kits omit dialog semantics. Only treat a visible
+    // high-layer element as a modal candidate when its class/id says so; this
+    // avoids promoting every fixed header or toast to the active context.
+    const marker = `${el.id || ''} ${typeof el.className === 'string' ? el.className : ''}`.toLowerCase();
+    if (!/(^|[-_\s])(modal|dialog|drawer|popover)([-_\s]|$)/.test(marker)) return false;
+    try {
+      const style = getComputedStyle(el);
+      return (style.position === 'fixed' || style.position === 'sticky') && Number(style.zIndex) > 10;
+    } catch {
+      return false;
+    }
   }
 
   function formatNode(el, role, name, ref, opts) {
@@ -376,6 +403,12 @@
     } else if (tag === 'select') {
       const selected = el.selectedOptions ? [...el.selectedOptions].map((option) => option.value).slice(0, 5) : [];
       if (selected.length) attrs.push(`value=${quote(selected.join('|'), 100)}`);
+      const choices = el.options ? [...el.options].slice(0, 40).map((option) => {
+        const label = clean(option.textContent);
+        return `${option.index}:${option.value}=${label}`;
+      }) : [];
+      if (choices.length) attrs.push(`options=${quote(choices.join(' | '), 900)}`);
+      if (el.options && el.options.length > choices.length) attrs.push(`optionsTruncated=${el.options.length}`);
     }
 
     if (tag === 'input' && el.getAttribute('placeholder')) attrs.push(`placeholder=${quote(el.getAttribute('placeholder'), 80)}`);
@@ -500,7 +533,16 @@
     }
 
     try {
-      walk(root, 0, false);
+      // Dialogs and overlays are often appended at the end of <body>. Visit
+      // semantic modal roots first so a large page cannot hide the thing the
+      // agent needs to act on behind maxNodes.
+      const modalRoots = deepQueryAll('dialog,[role="dialog"],[aria-modal="true"],[id*="modal" i],[id*="dialog" i],[class*="modal" i],[class*="dialog" i],[class*="drawer" i],[class*="popover" i]', root)
+        .filter(isModalRoot);
+      if (modalRoots.length) {
+        for (const modal of modalRoots) walk(modal, 0, false);
+      } else {
+        walk(root, 0, false);
+      }
     } catch (error) {
       lines.push(`... (snapshot stopped: ${error && error.message ? error.message : error})`);
       truncated = true;
@@ -1099,7 +1141,52 @@
 
   async function select(params = {}) {
     const el = resolveTarget(params).el;
-    if (el.tagName.toLowerCase() !== 'select') throw new Error('Target is not a <select> element.');
+    const tag = el.tagName.toLowerCase();
+
+    // Native selects can be changed reliably without opening the browser's
+    // OS-level picker. Custom comboboxes (React/MUI/Headless UI/etc.) need a
+    // real open-and-choose interaction, so support the same tool for them.
+    if (tag !== 'select') {
+      const role = roleOf(el);
+      const custom = role === 'combobox' || role === 'listbox' ||
+        el.getAttribute('aria-haspopup') === 'listbox' || el.getAttribute('aria-expanded') != null;
+      if (!custom) throw new Error('Target is not a <select> or a recognized custom combobox. Use chrome_click for this control.');
+      if (el.disabled || el.getAttribute('aria-disabled') === 'true') throw new Error('Target is disabled.');
+      if (!isVisible(el)) throw new Error('Target is not visible. Take a new snapshot or scroll it into view.');
+
+      const wanted = [];
+      if (Array.isArray(params.values)) wanted.push(...params.values.map(norm));
+      else if (params.value != null) wanted.push(norm(params.value));
+      if (Array.isArray(params.labels)) wanted.push(...params.labels.map(norm));
+      else if (params.label != null) wanted.push(norm(params.label));
+      const indices = Array.isArray(params.indexes) ? params.indexes.map(Number) : params.index != null ? [Number(params.index)] : [];
+      if (!wanted.length && !indices.length) throw new Error('Provide value, values, label, labels, index or indexes.');
+
+      await click({ ref: refFor(el), clickCount: 1 });
+      await nextFrame();
+      await nextFrame();
+      const candidates = queryDeep('[role="option"], [role="menuitem"], [role="menuitemradio"], [role="listbox"] > *, option, [data-value], [data-option-value]')
+        .filter((option) => option !== el && isVisible(option));
+      const matches = candidates.filter((option, index) => {
+        const optionName = norm(accessibleName(option, 300) || innerText(option));
+        const value = norm(option.getAttribute('data-value') || option.getAttribute('data-option-value') || option.getAttribute('value') || '');
+        return wanted.some((needle) => optionName === needle || value === needle || optionName.includes(needle)) || indices.includes(index);
+      });
+      if (!matches.length) {
+        const available = candidates.slice(0, 30).map((option, index) => `${index}:${truncate(accessibleName(option, 80) || innerText(option), 80)}`).join(', ');
+        throw new Error(`No matching custom option after opening combobox. Available: ${available || '(none; take a new snapshot)'}`);
+      }
+      const chosen = matches[0];
+      await click({ ref: refFor(chosen), clickCount: 1 });
+      return {
+        custom: true,
+        selected: [{ label: truncate(accessibleName(chosen, 120) || innerText(chosen), 120), value: chosen.getAttribute('data-value') || chosen.getAttribute('value') || undefined }],
+        expanded: el.getAttribute('aria-expanded') || undefined
+      };
+    }
+
+    if (el.disabled) throw new Error('Target is disabled.');
+    await scrollIntoView(el);
     const options = [...el.options];
     const wanted = [];
     if (Array.isArray(params.values)) wanted.push(...params.values.map(String));
@@ -1571,7 +1658,8 @@
       ref: isInteractive(el) ? refFor(el) : undefined,
       role: roleOf(el),
       name: truncate(accessibleName(el, 120), 120),
-      value: (el.type || '').toLowerCase() === 'password' ? '••••' : el.value
+      value: (el.type || '').toLowerCase() === 'password' ? '••••' : el.value,
+      rect: getRect(el)
     };
   }
 

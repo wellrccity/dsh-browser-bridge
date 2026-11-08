@@ -16,6 +16,11 @@ export function formatBridgeStatus(status) {
   const lines = [];
   lines.push(`Bridge: ${status.connected ? (status.ready ? 'connected' : 'connected (handshake pending)') : 'disconnected'}`);
   lines.push(`Endpoint: ws://${status.host}:${status.port}`);
+  if (status.mode === 'proxy') {
+    lines.push('Role: proxy (sharing the bridge owned by another OpenCode session)');
+  } else if (status.mode === 'owner' && status.controlClients > 0) {
+    lines.push(`Role: owner (${status.controlClients} proxy client${status.controlClients === 1 ? '' : 's'} attached)`);
+  }
   if (status.extension) {
     lines.push(`Extension: v${status.extension.version}${status.extension.extensionId ? ` (${status.extension.extensionId})` : ''}`);
     if (status.extension.settings) {
@@ -288,7 +293,11 @@ export function formatError(error) {
   }
   if (error && error.code === 'PORT_IN_USE') {
     lines.push('');
-    lines.push('Only one bridge process can own the port. Stop the other process or ask OpenCode to start this MCP server with a different OPENCODE_BROWSER_PORT.');
+    lines.push('The port is held by a process that is not an OpenCode Browser Bridge. Stop that process or set OPENCODE_BROWSER_PORT to a free port and update the extension popup.');
+  }
+  if (error && error.code === 'AUTH_FAILED') {
+    lines.push('');
+    lines.push('The bridge owner uses a different token. Set the same OPENCODE_BROWSER_TOKEN in every OpenCode session and in the extension popup.');
   }
   if (error && error.code === 'TIMEOUT') {
     lines.push('');

@@ -1,6 +1,6 @@
 /*
  * Popup controller for the OpenCode Browser Bridge extension.
- * All UI text is Portuguese; the MCP tool descriptions live on the server.
+ * All UI text is English; the MCP tool descriptions live on the server.
  */
 
 const $ = (id) => document.getElementById(id);
@@ -54,7 +54,7 @@ let busy = false;
 
 function send(type, payload = {}) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('A extensão não respondeu em 15s.')), 15000);
+    const timer = setTimeout(() => reject(new Error('The extension did not respond in 15s.')), 15000);
     try {
       chrome.runtime.sendMessage({ type, ...payload }, (response) => {
         clearTimeout(timer);
@@ -64,7 +64,7 @@ function send(type, payload = {}) {
           return;
         }
         if (!response) {
-          reject(new Error('O service worker não retornou resposta.'));
+          reject(new Error('The service worker did not return a response.'));
           return;
         }
         resolve(response);
@@ -120,7 +120,7 @@ function updateButtons() {
 function formatTime(ts) {
   if (!ts) return '—';
   try {
-    return new Date(ts).toLocaleTimeString('pt-BR');
+    return new Date(ts).toLocaleTimeString('en-US');
   } catch {
     return '—';
   }
@@ -140,10 +140,10 @@ function renderStatus(status) {
     state === 'connected' ? 'pill-on' : state === 'connecting' ? 'pill-connecting' : 'pill-off'
   );
   elements.statusPill.textContent = state === 'connected'
-    ? 'Conectado'
+    ? 'Connected'
     : state === 'connecting'
-      ? 'Conectando…'
-      : 'Desconectado';
+      ? 'Connecting…'
+      : 'Disconnected';
 
   elements.currentServer.textContent = status.serverUrl || '—';
   elements.currentServer.title = status.serverUrl || '';
@@ -152,11 +152,11 @@ function renderStatus(status) {
   const tabs = Array.isArray(status.tabs) ? status.tabs : [];
   const active = tabs.find((tab) => tab.active) || tabs.find((tab) => tab.id === status.activeTabId);
   if (active) {
-    const label = active.title || active.url || `Aba ${active.id}`;
+    const label = active.title || active.url || `Tab ${active.id}`;
     elements.activeTab.textContent = shorten(label, 42);
     elements.activeTab.title = `${label}\n${active.url || ''}`;
   } else {
-    elements.activeTab.textContent = status.activeTabId ? `Aba ${status.activeTabId}` : 'Nenhuma';
+    elements.activeTab.textContent = status.activeTabId ? `Tab ${status.activeTabId}` : 'None';
     elements.activeTab.title = '';
   }
 
@@ -164,8 +164,8 @@ function renderStatus(status) {
   elements.tabCount.textContent = String(tabs.length);
   elements.debuggerTabs.textContent = Array.isArray(status.debuggerTabs) && status.debuggerTabs.length
     ? status.debuggerTabs.map((item) => item.tabId).join(', ')
-    : 'Nenhuma';
-  elements.hasToken.textContent = status.hasToken ? 'Sim' : 'Não';
+    : 'None';
+  elements.hasToken.textContent = status.hasToken ? 'Yes' : 'No';
 
   if (status.lastError) {
     elements.lastError.textContent = status.lastError;
@@ -181,7 +181,7 @@ function renderStatus(status) {
 async function refreshStatus(showErrors = false) {
   try {
     const response = await send('getStatus');
-    if (!response.ok) throw new Error(response.error || 'Falha ao consultar o status.');
+    if (!response.ok) throw new Error(response.error || 'Failed to query status.');
     renderStatus(response.status);
   } catch (error) {
     if (showErrors) setFeedback(error.message, 'bad');
@@ -219,16 +219,16 @@ function readForm() {
 async function saveSettings() {
   const settings = readForm();
   if (!/^wss?:\/\//i.test(settings.serverUrl)) {
-    setFeedback('A URL deve começar com ws:// ou wss://.', 'bad');
+    setFeedback('The URL must start with ws:// or wss://.', 'bad');
     return;
   }
   setBusy(true);
   try {
     const response = await send('saveSettings', { settings, reconnect: true });
-    if (!response.ok) throw new Error(response.error || 'Não foi possível salvar.');
+    if (!response.ok) throw new Error(response.error || 'Could not save.');
     fillForm(settings);
     renderStatus(response.status);
-    setFeedback('Configurações salvas. Reconectando…', 'ok');
+    setFeedback('Settings saved. Reconnecting…', 'ok');
   } catch (error) {
     setFeedback(error.message, 'bad');
   } finally {
@@ -238,12 +238,12 @@ async function saveSettings() {
 
 async function connect() {
   setBusy(true);
-  setFeedback('Conectando ao servidor MCP…');
+  setFeedback('Connecting to MCP server…');
   try {
     const response = await send('connect');
-    if (!response.ok) throw new Error(response.error || 'Falha ao conectar.');
+    if (!response.ok) throw new Error(response.error || 'Failed to connect.');
     renderStatus(response.status);
-    setFeedback('Conectado.', 'ok');
+    setFeedback('Connected.', 'ok');
   } catch (error) {
     setFeedback(error.message, 'bad');
     await refreshStatus();
@@ -256,8 +256,8 @@ async function disconnect() {
   setBusy(true);
   try {
     const response = await send('disconnect');
-    if (!response.ok) throw new Error(response.error || 'Falha ao desconectar.');
-    setFeedback('Desconectado. A reconexão automática fica pausada até você conectar de novo.', 'ok');
+    if (!response.ok) throw new Error(response.error || 'Failed to disconnect.');
+    setFeedback('Disconnected. Auto-reconnect is paused until you connect again.', 'ok');
     await refreshStatus();
   } catch (error) {
     setFeedback(error.message, 'bad');
@@ -270,10 +270,10 @@ async function detachDebugger() {
   setBusy(true);
   try {
     const response = await send('detachDebugger');
-    if (!response.ok) throw new Error(response.error || 'Falha ao desanexar.');
+    if (!response.ok) throw new Error(response.error || 'Failed to detach.');
     const detached = response.result && Array.isArray(response.result.detached) ? response.result.detached : [];
     setFeedback(
-      detached.length ? `Depurador desanexado de ${detached.length} aba(s).` : 'Nenhuma aba estava anexada.',
+      detached.length ? `Debugger detached from ${detached.length} tab(s).` : 'No tabs were attached.',
       'ok'
     );
     await refreshStatus();

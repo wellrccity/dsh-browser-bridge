@@ -173,9 +173,9 @@ test('MCP server exposes tools and relays browser commands', { timeout: 30000 },
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name);
     for (const name of [
-      'status', 'tabs', 'navigate', 'snapshot', 'screenshot', 'click', 'type', 'press',
-      'hover', 'select', 'scroll', 'wait_for', 'evaluate', 'dom', 'fill_form', 'upload_file',
-      'console', 'network', 'cookies', 'dialog', 'highlight', 'drag', 'emulate', 'debugger'
+      'visual', 'cursor', 'status', 'tabs', 'navigate', 'snapshot', 'screenshot', 'type', 'press',
+      'select', 'scroll', 'wait_for', 'evaluate', 'dom', 'fill_form', 'upload_file',
+      'console', 'network', 'cookies', 'dialog', 'drag', 'emulate', 'debugger'
     ]) {
       assert.ok(names.includes(name), `missing tool "${name}" (got: ${names.join(', ')})\n${stderr}`);
     }
@@ -226,5 +226,67 @@ test('MCP server exposes tools and relays browser commands', { timeout: 30000 },
       }
     }
     await client.close().catch(() => {});
+  }
+});
+
+test('two MCP servers share one browser bridge', { timeout: 30000 }, async () => {
+  const port = await freePort();
+  const stderr = { owner: '', proxy: '' };
+
+  const start = (key) => {
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: ['server/src/index.js'],
+      cwd: root,
+      stderr: 'pipe',
+      env: {
+        ...getDefaultEnvironment(),
+        OPENCODE_BROWSER_HOST: '127.0.0.1',
+        OPENCODE_BROWSER_PORT: String(port),
+        OPENCODE_BROWSER_TOKEN: ''
+      }
+    });
+    transport.stderr?.on('data', (chunk) => {
+      stderr[key] += chunk.toString();
+    });
+    const client = new Client({ name: `browser-bridge-${key}`, version: '1.0.0' }, { capabilities: {} });
+    return { transport, client };
+  };
+
+  const owner = start('owner');
+  const proxy = start('proxy');
+  let mock = null;
+
+  try {
+    await owner.client.connect(owner.transport);
+    await proxy.client.connect(proxy.transport);
+
+    mock = connectMockExtension(port);
+    await waitOpen(mock.socket);
+    mock.socket.send(JSON.stringify({ type: 'hello', version: 'test', extensionId: 'mock-extension' }));
+    await mock.welcome;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    const ownerStatus = await owner.client.callTool({ name: 'status', arguments: {} });
+    const proxyStatus = await proxy.client.callTool({ name: 'status', arguments: {} });
+    assert.match(textOf(ownerStatus), /Bridge: connected/, textOf(ownerStatus) + stderr.owner);
+    assert.match(textOf(proxyStatus), /Bridge: connected/, textOf(proxyStatus) + stderr.proxy);
+    assert.match(textOf(proxyStatus), /Role: proxy/, textOf(proxyStatus));
+
+    const navigation = await proxy.client.callTool({
+      name: 'navigate',
+      arguments: { url: 'https://shared.example/', waitUntil: 'load' }
+    });
+    assert.match(textOf(navigation), /shared\.example/, textOf(navigation) + stderr.proxy);
+  } finally {
+    if (mock) {
+      try {
+        mock.socket.close();
+      } catch {
+        // Ignore.
+      }
+    }
+    await proxy.client.close().catch(() => {});
+    await owner.client.close().catch(() => {});
   }
 });

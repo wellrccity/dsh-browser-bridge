@@ -43,6 +43,7 @@ export class BrowserBridge extends EventEmitter {
     this.requestTimeout = Number(options.requestTimeout) || 30000;
     this.wss = null;
     this.client = null;
+    this.controls = new Set();
     this.hello = null;
     this.connectedAt = null;
     this.lastSeen = 0;
@@ -64,25 +65,35 @@ export class BrowserBridge extends EventEmitter {
       this.logger(`WebSocket server error: ${error.message}`);
     });
 
-    await new Promise((resolve, reject) => {
-      const onListening = () => {
-        this.wss.off('error', onError);
-        resolve();
-      };
-      const onError = (error) => {
-        this.wss.off('listening', onListening);
-        if (error && error.code === 'EADDRINUSE') {
-          reject(new BridgeError(
-            `Port ${this.port} is already in use. Stop the other bridge instance or set OPENCODE_BROWSER_PORT to a free port and update the extension settings.`,
-            'PORT_IN_USE'
-          ));
-        } else {
-          reject(error);
-        }
-      };
-      this.wss.once('listening', onListening);
-      this.wss.once('error', onError);
-    });
+    try {
+      await new Promise((resolve, reject) => {
+        const onListening = () => {
+          this.wss.off('error', onError);
+          resolve();
+        };
+        const onError = (error) => {
+          this.wss.off('listening', onListening);
+          if (error && error.code === 'EADDRINUSE') {
+            reject(new BridgeError(
+              `Port ${this.port} is already in use. Stop the other bridge instance or set OPENCODE_BROWSER_PORT to a free port and update the extension settings.`,
+              'PORT_IN_USE'
+            ));
+          } else {
+            reject(error);
+          }
+        };
+        this.wss.once('listening', onListening);
+        this.wss.once('error', onError);
+      });
+    } catch (error) {
+      try {
+        this.wss.close();
+      } catch {
+        // The server never started listening.
+      }
+      this.wss = null;
+      throw error;
+    }
 
     const address = this.wss.address();
     if (address && typeof address === 'object' && address.port) {
@@ -123,15 +134,24 @@ export class BrowserBridge extends EventEmitter {
     }
 
     let token = '';
+    let role = 'extension';
     try {
       const url = new URL(request.url || '/', `http://${this.host}:${this.port}`);
       token = url.searchParams.get('token') || '';
+      role = url.searchParams.get('role') || 'extension';
     } catch {
       // Ignore.
     }
     if (this.token && token !== this.token) {
       this.logger('rejected connection: invalid token');
       socket.close(4001, 'invalid token');
+      return;
+    }
+
+    // Another OpenCode session attaches here instead of listening on the port
+    // itself. Control clients never replace the extension connection.
+    if (role === 'control') {
+      this.handleControl(socket);
       return;
     }
 
@@ -175,6 +195,11 @@ export class BrowserBridge extends EventEmitter {
         this.rejectPending(`Extension disconnected (code ${code}${reason ? ': ' + reason.toString() : ''}).`, 'DISCONNECTED');
         this.logger(`extension disconnected (code ${code})`);
         this.emit('disconnect', { code, reason: reason ? reason.toString() : '' });
+        this.broadcastControl({
+          type: 'control_event',
+          event: 'disconnect',
+          data: { code, reason: reason ? reason.toString() : '' }
+        });
       }
     });
 
@@ -184,6 +209,98 @@ export class BrowserBridge extends EventEmitter {
 
     this.emit('connection', { origin });
     this.logger('extension connected; waiting for hello');
+  }
+
+  handleControl(socket) {
+    this.controls.add(socket);
+    socket.isAlive = true;
+    this.logger(`control client connected (${this.controls.size} attached)`);
+
+    socket.on('pong', () => {
+      socket.isAlive = true;
+    });
+
+    socket.on('message', (data) => {
+      let message;
+      try {
+        message = JSON.parse(data.toString());
+      } catch {
+        this.logger('received invalid JSON from a control client');
+        return;
+      }
+      this.handleControlMessage(socket, message);
+    });
+
+    socket.on('close', (code) => {
+      this.controls.delete(socket);
+      this.logger(`control client disconnected (code ${code}; ${this.controls.size} attached)`);
+    });
+
+    socket.on('error', (error) => {
+      this.logger(`control socket error: ${error.message}`);
+    });
+
+    this.sendTo(socket, {
+      type: 'control_welcome',
+      server: 'opencode-browser-bridge',
+      version: '0.1.3',
+      status: this.status()
+    });
+  }
+
+  handleControlMessage(socket, message) {
+    if (!message || typeof message.type !== 'string') return;
+
+    if (message.type === 'control_ping') {
+      this.sendTo(socket, { type: 'control_pong', ts: message.ts });
+      return;
+    }
+
+    if (message.type === 'control_status') {
+      this.sendTo(socket, {
+        type: 'control_status',
+        id: message.id,
+        ok: true,
+        result: this.status()
+      });
+      return;
+    }
+
+    if (message.type === 'control_request') {
+      const id = message.id;
+      const method = typeof message.method === 'string' ? message.method : '';
+      if (!id || !method) {
+        this.sendTo(socket, {
+          type: 'control_response',
+          id,
+          ok: false,
+          error: { message: 'A control request requires an id and a method.', code: 'INVALID_REQUEST' }
+        });
+        return;
+      }
+
+      const timeout = Math.max(1000, Math.min(Number(message.timeout) || this.requestTimeout, 180000));
+      this.request(method, message.params || {}, { timeout })
+        .then((result) => {
+          this.sendTo(socket, { type: 'control_response', id, ok: true, result });
+        })
+        .catch((error) => {
+          this.sendTo(socket, {
+            type: 'control_response',
+            id,
+            ok: false,
+            error: {
+              message: error && error.message ? error.message : String(error),
+              code: error && error.code ? error.code : 'CONTROL_ERROR',
+              details: error && error.details ? error.details : undefined
+            }
+          });
+        });
+    }
+  }
+
+  broadcastControl(message) {
+    for (const socket of this.controls) this.sendTo(socket, message);
   }
 
   handleMessage(socket, message) {
@@ -206,6 +323,7 @@ export class BrowserBridge extends EventEmitter {
         heartbeatSeconds: 20
       });
       this.emit('ready', this.hello);
+      this.broadcastControl({ type: 'control_event', event: 'ready', data: this.hello });
       return;
     }
 
@@ -238,6 +356,7 @@ export class BrowserBridge extends EventEmitter {
 
     if (message.type === 'event') {
       this.emit('event', message);
+      this.broadcastControl({ type: 'control_event', event: 'event', data: message });
       return;
     }
   }
@@ -274,7 +393,9 @@ export class BrowserBridge extends EventEmitter {
       connectedAt: this.connectedAt,
       lastSeen: this.lastSeen,
       pendingRequests: this.pending.size,
-      tokenRequired: !!this.token
+      tokenRequired: !!this.token,
+      mode: 'owner',
+      controlClients: this.controls.size
     };
   }
 
@@ -337,6 +458,15 @@ export class BrowserBridge extends EventEmitter {
     }
     this.client = null;
     this.hello = null;
+    this.connectedAt = null;
+    for (const socket of this.controls) {
+      try {
+        socket.close(1001, 'server shutdown');
+      } catch {
+        // Ignore.
+      }
+    }
+    this.controls.clear();
     if (this.wss) {
       await new Promise((resolve) => {
         this.wss.close(() => resolve());
