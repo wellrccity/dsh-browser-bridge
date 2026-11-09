@@ -1430,6 +1430,9 @@ async function handleCursor(params = {}) {
       exactText: params.exactText,
       smooth: false
     }, { timeout: 6000 });
+    if (frameId !== 0) {
+      await execInFrame(tab.id, 0, 'scroll', { to: 'top', smooth: false }, { timeout: 3000 }).catch(() => {});
+    }
     target = await execInFrame(tab.id, frameId, 'resolve', {
       ref: params.ref,
       selector: params.selector,
@@ -1586,10 +1589,10 @@ async function handleHover(params = {}) {
 function effectiveTypingDelay(params, trusted) {
   if (params.delay != null) return Math.max(0, Math.min(Number(params.delay) || 0, 1000));
   const length = String(params.text || '').length;
-  if (!trusted) return length > 200 ? 0 : 8;
-  if (length > 800) return 0;
-  if (length > 300) return 2;
-  return 12;
+  if (!trusted) return length > 200 ? 5 : 16;
+  if (length > 800) return 4;
+  if (length > 300) return 8;
+  return 18;
 }
 
 async function handleType(params = {}) {

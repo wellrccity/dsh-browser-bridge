@@ -8,7 +8,55 @@
 
 const attached = new Map();
 const mousePositions = new Map();
+const POSITION_KEY = 'cursorPositions';
+let positionCache = null;
+let positionWrite = Promise.resolve();
 let dialogHandler = null;
+
+async function getPositionMap() {
+  if (positionCache) return positionCache;
+  try {
+    const stored = await chrome.storage.session.get(POSITION_KEY);
+    positionCache = stored[POSITION_KEY] || {};
+  } catch {
+    positionCache = {};
+  }
+  return positionCache;
+}
+
+function saveMousePosition(tabId, position) {
+  mousePositions.set(tabId, position);
+  positionWrite = positionWrite.then(async () => {
+    const positions = await getPositionMap();
+    positions[tabId] = position;
+    positions.__last = position;
+    positionCache = positions;
+    try {
+      await chrome.storage.session.set({ [POSITION_KEY]: positions });
+    } catch {
+      // The in-memory position remains available if session storage is unavailable.
+    }
+  });
+  return positionWrite;
+}
+
+async function getMousePosition(tabId) {
+  if (mousePositions.has(tabId)) return mousePositions.get(tabId);
+  const positions = await getPositionMap();
+  const position = positions[tabId];
+  if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) {
+    mousePositions.set(tabId, position);
+    return position;
+  }
+  return null;
+}
+
+function clampPoint(x, y, width, height) {
+  return {
+    x: Math.max(0, Math.min(Number(x) || 0, Math.max(0, Number(width) - 1))),
+    y: Math.max(0, Math.min(Number(y) || 0, Math.max(0, Number(height) - 1)))
+  };
+}
 
 export function setDialogHandler(handler) {
   dialogHandler = handler;
@@ -111,12 +159,19 @@ export async function moveMouse(tabId, x, y, options = {}) {
   if (!Number.isFinite(targetX) || !Number.isFinite(targetY)) {
     throw new Error('Mouse target coordinates must be finite numbers.');
   }
-  const steps = Math.max(1, Math.min(Number(options.steps) || 8, 80));
-  const duration = Math.max(0, Math.min(Number(options.duration) || 120, 3000));
-  const jitter = Math.max(0, Math.min(Number(options.jitter) || 1.2, 8));
-  const from = mousePositions.get(tabId) || {
-    x: Math.max(8, targetX * 0.55),
-    y: Math.max(8, targetY * 0.45)
+  const viewport = await send(tabId, 'Runtime.evaluate', {
+    expression: '({ width: window.innerWidth, height: window.innerHeight })',
+    returnByValue: true,
+    awaitPromise: false
+  }).catch(() => ({ result: { value: { width: targetX + 1, height: targetY + 1 } } }));
+  const size = viewport?.result?.value || {};
+  const target = clampPoint(targetX, targetY, size.width, size.height);
+  const steps = Math.max(1, Math.min(Number(options.steps) || 12, 80));
+  const duration = Math.max(0, Math.min(Number(options.duration) || 260, 3000));
+  const jitter = Math.max(0, Math.min(Number(options.jitter) || 2.2, 8));
+  const from = await getMousePosition(tabId) || {
+    x: Math.max(0, Math.min(size.width - 1, Math.round(size.width * 0.52))),
+    y: Math.max(0, Math.min(size.height - 1, Math.round(size.height * 0.55)))
   };
 
   for (let index = 1; index <= steps; index++) {
@@ -125,14 +180,16 @@ export async function moveMouse(tabId, x, y, options = {}) {
       ? 2 * progress * progress
       : 1 - Math.pow(-2 * progress + 2, 2) / 2;
     const remaining = 1 - progress;
+    const curve = Math.sin(Math.PI * progress) * Math.min(36, Math.hypot(target.x - from.x, target.y - from.y) * 0.08);
     const dx = index === steps ? 0 : (Math.random() * 2 - 1) * jitter * remaining;
     const dy = index === steps ? 0 : (Math.random() * 2 - 1) * jitter * remaining;
-    const currentX = from.x + (targetX - from.x) * eased + dx;
-    const currentY = from.y + (targetY - from.y) * eased + dy;
+    const currentX = from.x + (target.x - from.x) * eased - curve * (target.y - from.y) / Math.max(1, Math.hypot(target.x - from.x, target.y - from.y)) + dx;
+    const currentY = from.y + (target.y - from.y) * eased + curve * (target.x - from.x) / Math.max(1, Math.hypot(target.x - from.x, target.y - from.y)) + dy;
+    const point = clampPoint(currentX, currentY, size.width, size.height);
     await send(tabId, 'Input.dispatchMouseEvent', {
       type: 'mouseMoved',
-      x: Math.round(currentX * 100) / 100,
-      y: Math.round(currentY * 100) / 100,
+      x: Math.round(point.x * 100) / 100,
+      y: Math.round(point.y * 100) / 100,
       button: 'none',
       buttons: 0
     });
@@ -140,19 +197,30 @@ export async function moveMouse(tabId, x, y, options = {}) {
       await new Promise((resolve) => setTimeout(resolve, Math.max(4, duration / steps)));
     }
   }
-  mousePositions.set(tabId, { x: targetX, y: targetY });
-  return { x: targetX, y: targetY, steps };
+  await saveMousePosition(tabId, target);
+  return { ...target, steps };
 }
 
 export async function clickMouse(tabId, x, y, options = {}) {
   const human = options.human === true;
   if (human) {
-    await moveMouse(tabId, x, y, options);
+    const target = await moveMouse(tabId, x, y, options);
+    x = target.x;
+    y = target.y;
   } else {
+    const viewport = await send(tabId, 'Runtime.evaluate', {
+      expression: '({ width: window.innerWidth, height: window.innerHeight })',
+      returnByValue: true,
+      awaitPromise: false
+    }).catch(() => ({ result: { value: { width: Number(x) + 1, height: Number(y) + 1 } } }));
+    const size = viewport?.result?.value || {};
+    const point = clampPoint(x, y, size.width, size.height);
+    x = point.x;
+    y = point.y;
     await send(tabId, 'Input.dispatchMouseEvent', {
       type: 'mouseMoved', x, y, button: 'none', buttons: 0
     });
-    mousePositions.set(tabId, { x, y });
+    await saveMousePosition(tabId, point);
   }
 
   const button = options.button === 'right' ? 'right' : options.button === 'middle' ? 'middle' : 'left';
@@ -303,7 +371,7 @@ export async function typeText(tabId, text, options = {}) {
     // Cadence: fast human typing (~45 wpm), scaling down for longer text
     const baseDelay = options.delay != null
       ? Math.max(0, Number(options.delay))
-      : (len > 200 ? 4 : len > 80 ? 12 : 24);
+      : (len > 200 ? 9 : len > 80 ? 20 : 34);
 
     for (const ch of value) {
       if (ch === '\n' || ch === '\r') {
@@ -622,7 +690,7 @@ const CURSOR_INIT = `(() => {
     'pointer-events:none',
     'z-index:2147483647',
     'display:block',
-    'transform:translate(100px,100px)',
+    'transform:translate(0px,0px)',
     'transition:transform 0.08s ease-out',
     'will-change:transform'
   ].join(';');
@@ -670,10 +738,21 @@ const CURSOR_INIT = `(() => {
 })()`;
 
 export async function ensureCursor(tabId) {
+  const positions = await getPositionMap();
+  const storedPosition = positions[tabId] || positions.__last || { x: 0, y: 0 };
+  const dimensions = await send(tabId, 'Runtime.evaluate', {
+    expression: '({ width: window.innerWidth, height: window.innerHeight })',
+    returnByValue: true,
+    awaitPromise: false
+  }).catch(() => ({ result: { value: { width: 1, height: 1 } } }));
+  const size = dimensions?.result?.value || {};
+  const point = clampPoint(storedPosition.x, storedPosition.y, size.width, size.height);
+  const safePosition = { x: Math.round(point.x), y: Math.round(point.y) };
+  const initializer = `globalThis.__DSH_CURSOR_POSITION__={x:${safePosition.x},y:${safePosition.y}};`;
   // 1. If CDP is attached, run via CDP Runtime.evaluate
   if (attached.has(tabId)) {
     try {
-      await send(tabId, 'Runtime.evaluate', { expression: CURSOR_INIT, returnByValue: true, awaitPromise: false });
+      await send(tabId, 'Runtime.evaluate', { expression: `${initializer}${CURSOR_INIT}`, returnByValue: true, awaitPromise: false });
       return;
     } catch {}
   }
@@ -681,7 +760,10 @@ export async function ensureCursor(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
-      func: () => {
+      args: [safePosition],
+      func: (storedPosition) => {
+        globalThis.__DSH_CURSOR_POSITION__ = storedPosition;
+        const stored = storedPosition;
         const ID = '__oc_cursor__';
         let d = document.getElementById(ID);
         if (d) {
@@ -698,7 +780,7 @@ export async function ensureCursor(tabId) {
           'pointer-events:none',
           'z-index:2147483647',
           'display:block',
-          'transform:translate(100px,100px)',
+          `transform:translate(${Number(stored?.x) || 0}px,${Number(stored?.y) || 0}px)`,
           'transition:transform 0.08s ease-out',
           'will-change:transform'
         ].join(';');
@@ -737,8 +819,15 @@ export async function ensureCursor(tabId) {
 
 export async function showCursor(tabId, x, y) {
   await ensureCursor(tabId);
-  const nx = Math.round(Number(x) || 0);
-  const ny = Math.round(Number(y) || 0);
+  const dimensions = await send(tabId, 'Runtime.evaluate', {
+    expression: '({ width: window.innerWidth, height: window.innerHeight })',
+    returnByValue: true,
+    awaitPromise: false
+  }).catch(() => ({ result: { value: { width: Number(x) + 1, height: Number(y) + 1 } } }));
+  const size = dimensions?.result?.value || {};
+  const point = clampPoint(x, y, size.width, size.height);
+  const nx = Math.round(point.x);
+  const ny = Math.round(point.y);
   try {
     await send(tabId, 'Runtime.evaluate', {
       expression: `(() => { const e = document.getElementById('__oc_cursor__'); if (e) { e.style.display='block'; e.style.transform='translate(${nx}px,${ny}px)'; } })()`,
@@ -748,6 +837,7 @@ export async function showCursor(tabId, x, y) {
   } catch {
     // Ignore — CSP or closed tab.
   }
+  await saveMousePosition(tabId, { x: nx, y: ny });
   return { visible: true, x: nx, y: ny };
 }
 
@@ -765,32 +855,42 @@ export async function hideCursor(tabId) {
 }
 
 export async function moveCursorTo(tabId, x, y, options = {}) {
-  const nx = Math.round(Number(x) || 0);
-  const ny = Math.round(Number(y) || 0);
   await ensureCursor(tabId);
+  const dimensions = await send(tabId, 'Runtime.evaluate', {
+    expression: '({ width: window.innerWidth, height: window.innerHeight })',
+    returnByValue: true,
+    awaitPromise: false
+  }).catch(() => ({ result: { value: { width: Number(x) + 1, height: Number(y) + 1 } } }));
+  const size = dimensions?.result?.value || {};
+  const point = clampPoint(x, y, size.width, size.height);
+  const nx = Math.round(point.x);
+  const ny = Math.round(point.y);
   const animate = options.animate !== false;
   if (animate) {
-    const from = mousePositions.get(tabId) || { x: 0, y: 0 };
-    const steps = Math.max(2, Math.min(Number(options.steps) || 6, 20));
+    const from = await getMousePosition(tabId) || { x: Math.round(size.width * 0.52), y: Math.round(size.height * 0.55) };
+    const steps = Math.max(2, Math.min(Number(options.steps) || 12, 30));
     for (let i = 1; i <= steps; i++) {
       const t = i / steps;
       const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-      const cx = Math.round(from.x + (nx - from.x) * eased);
-      const cy = Math.round(from.y + (ny - from.y) * eased);
+      const arc = Math.sin(Math.PI * t) * Math.min(30, Math.hypot(nx - from.x, ny - from.y) * 0.07);
+      const distance = Math.max(1, Math.hypot(nx - from.x, ny - from.y));
+      const drift = i < steps ? (Math.random() - 0.5) * 3 * (1 - t) : 0;
+      const cx = Math.round(from.x + (nx - from.x) * eased - arc * (ny - from.y) / distance + drift);
+      const cy = Math.round(from.y + (ny - from.y) * eased + arc * (nx - from.x) / distance - drift);
       try {
         await send(tabId, 'Runtime.evaluate', {
-          expression: `(() => { const e = document.getElementById('__oc_cursor__'); if (e) { e.style.display='block'; e.style.transform='translate(${cx}px,${cy}px)'; } })()`,
+          expression: `(() => { globalThis.__DSH_CURSOR_POSITION__={x:${cx},y:${cy}}; const e = document.getElementById('__oc_cursor__'); if (e) { e.style.display='block'; e.style.transform='translate(${cx}px,${cy}px)'; } })()`,
           returnByValue: true,
           awaitPromise: false
         });
       } catch {
         break;
       }
-      if (i < steps) await new Promise((r) => setTimeout(r, 14));
+      if (i < steps) await new Promise((r) => setTimeout(r, 22));
     }
   } else {
     await showCursor(tabId, nx, ny);
   }
-  mousePositions.set(tabId, { x: nx, y: ny });
+  await saveMousePosition(tabId, { x: nx, y: ny });
   return { x: nx, y: ny };
 }

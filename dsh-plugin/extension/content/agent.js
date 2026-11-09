@@ -1222,6 +1222,11 @@
   }
 
   async function scroll(params = {}) {
+    if (params.text && !params.selector && !params.ref) {
+      const target = resolveTarget(params).el;
+      await scrollIntoView(target);
+      return { scrolledToElement: true, ...getPosition() };
+    }
     const to = String(params.to || '').toLowerCase();
     const direction = String(params.direction || 'down').toLowerCase();
     const amount = Number(params.amount) || 600;
