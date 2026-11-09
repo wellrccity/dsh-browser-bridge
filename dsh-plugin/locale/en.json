@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Chrome browser bridge",
+    "description": "Runs the OpenCode Browser Bridge MCP server, which drives a real Chrome through the bundled extension and exposes chrome_* tools to the agent."
+  }
+}

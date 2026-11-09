@@ -1,5 +1,5 @@
 /*
- * Shares one BrowserBridge across OpenCode sessions.
+ * Shares one BrowserBridge across DSH sessions.
  *
  * The first MCP server to start owns ws://127.0.0.1:8787. Every later server
  * attaches to that owner over a local control channel instead of failing with
@@ -15,7 +15,7 @@ import { EventEmitter } from 'node:events';
 import WebSocket from 'ws';
 import { BrowserBridge, BridgeError } from './bridge.js';
 
-const SERVER_NAME = 'opencode-browser-bridge';
+const SERVER_NAME = 'dsh-browser-bridge';
 
 function stderrLogger(message) {
   process.stderr.write(`[browser-bridge] ${message}\n`);
@@ -113,7 +113,7 @@ export class BridgeProxy extends EventEmitter {
 
       const timer = setTimeout(() => {
         finish(new BridgeError(
-          `Port ${this.port} is in use, but the process did not answer as an OpenCode Browser Bridge. Stop it or set OPENCODE_BROWSER_PORT to a free port.`,
+          `Port ${this.port} is in use, but the process did not answer as an DSH Browser Bridge. Stop it or set DSH_BROWSER_PORT to a free port.`,
           'PORT_IN_USE'
         ));
       }, this.connectTimeout);
@@ -140,7 +140,7 @@ export class BridgeProxy extends EventEmitter {
       const onClose = (code, reason) => {
         if (code === 4001) {
           finish(new BridgeError(
-            'The bridge owner rejected the connection token. Use the same OPENCODE_BROWSER_TOKEN in every OpenCode session and in the extension popup.',
+            'The bridge owner rejected the connection token. Use the same DSH_BROWSER_TOKEN in every DSH session and in the extension popup.',
             'AUTH_FAILED'
           ));
           return;
@@ -241,7 +241,7 @@ export class BridgeProxy extends EventEmitter {
   async request(method, params = {}, options = {}) {
     if (!this.attached || !this.socket || this.socket.readyState !== WebSocket.OPEN) {
       throw new BridgeError(
-        'The OpenCode session that owns the browser bridge is not reachable. Reconnect it or restart OpenCode.',
+        'The DSH session that owns the browser bridge is not reachable. Reconnect it or restart DSH.',
         'NOT_CONNECTED'
       );
     }
@@ -388,7 +388,7 @@ export class BridgeConnection extends EventEmitter {
   request(method, params = {}, options = {}) {
     if (!this.backend) {
       return Promise.reject(new BridgeError(
-        'No browser bridge is available. Start OpenCode again or reconnect the chrome MCP server.',
+        'No browser bridge is available. Start DSH again or reconnect the chrome MCP server.',
         'NOT_CONNECTED'
       ));
     }
@@ -424,7 +424,7 @@ export class BridgeConnection extends EventEmitter {
         // A port held by a non-bridge process answers the TCP connection but
         // never sends a welcome. Retrying only helps when the owner is still
         // starting, so fail fast on the timeout instead of waiting five times.
-        if (/did not answer as an OpenCode Browser Bridge/i.test(error.message)) throw error;
+        if (/did not answer as an DSH Browser Bridge/i.test(error.message)) throw error;
         await delay(100 * (attempt + 1));
       }
     }

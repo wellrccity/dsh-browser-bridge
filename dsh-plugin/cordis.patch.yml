@@ -1,0 +1,21 @@
+# DSH Browser Bridge — bundle patch.
+#
+# One row connects the MCP server shipped inside this package (server/src/index.js)
+# to the Harness. The extension in ./extension is loaded by Chrome, not by dsh.
+#
+# The server path is derived at mount time from the profile directory, so this
+# bundle keeps working wherever the package is installed. Keep the port in sync
+# with the extension popup (chrome://extensions -> DSH Browser Bridge).
+- insert:
+    - id: opencode-browser-bridge
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: chrome
+        transport: stdio
+        command: node
+        args:
+          - !!js "(process.env.DSH_PROFILE_DIR ?? (process.env.DSH_HOME ?? (process.env.HOME + '/.dsh')) + '/profiles/' + (process.env.DSH_PROFILE ?? 'web')) + '/node_modules/@local/opencode-browser-bridge/server/src/index.js'"
+        cwd: !!js "(process.env.DSH_PROFILE_DIR ?? (process.env.DSH_HOME ?? (process.env.HOME + '/.dsh')) + '/profiles/' + (process.env.DSH_PROFILE ?? 'web')) + '/node_modules/@local/opencode-browser-bridge'"
+        env:
+          DSH_BROWSER_PORT: '8787'
+        failOnStartupError: true

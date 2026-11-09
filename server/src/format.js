@@ -17,7 +17,7 @@ export function formatBridgeStatus(status) {
   lines.push(`Bridge: ${status.connected ? (status.ready ? 'connected' : 'connected (handshake pending)') : 'disconnected'}`);
   lines.push(`Endpoint: ws://${status.host}:${status.port}`);
   if (status.mode === 'proxy') {
-    lines.push('Role: proxy (sharing the bridge owned by another OpenCode session)');
+    lines.push('Role: proxy (sharing the bridge owned by another DSH session)');
   } else if (status.mode === 'owner' && status.controlClients > 0) {
     lines.push(`Role: owner (${status.controlClients} proxy client${status.controlClients === 1 ? '' : 's'} attached)`);
   }
@@ -34,9 +34,9 @@ export function formatBridgeStatus(status) {
   if (!status.connected) {
     lines.push('');
     lines.push('The extension is not connected. Check:');
-    lines.push('1. chrome://extensions → "OpenCode Browser Bridge" is enabled.');
+    lines.push('1. chrome://extensions → "DSH Browser Bridge" is enabled.');
     lines.push('2. Its popup shows the same server URL (default ws://127.0.0.1:8787).');
-    lines.push('3. The MCP server is running (OpenCode starts it from opencode.jsonc).');
+    lines.push('3. The MCP server is running (DSH starts it from opencode.jsonc).');
     lines.push('4. Only one bridge process is using the port.');
   }
   return lines.join('\n');
@@ -289,21 +289,21 @@ export function formatError(error) {
   const lines = [`Browser bridge error${code}: ${error && error.message ? error.message : String(error)}`];
   if (error && error.code === 'NOT_CONNECTED') {
     lines.push('');
-    lines.push('Open chrome://extensions, enable "OpenCode Browser Bridge", then open its popup and confirm it shows "Conectado".');
+    lines.push('Open chrome://extensions, enable "DSH Browser Bridge", then open its popup and confirm it shows "Conectado".');
   }
   if (error && error.code === 'PORT_IN_USE') {
     lines.push('');
-    lines.push('The port is held by a process that is not an OpenCode Browser Bridge. Stop that process or set OPENCODE_BROWSER_PORT to a free port and update the extension popup.');
+    lines.push('The port is held by a process that is not an DSH Browser Bridge. Stop that process or set DSH_BROWSER_PORT to a free port and update the extension popup.');
   }
   if (error && error.code === 'AUTH_FAILED') {
     lines.push('');
-    lines.push('The bridge owner uses a different token. Set the same OPENCODE_BROWSER_TOKEN in every OpenCode session and in the extension popup.');
+    lines.push('The bridge owner uses a different token. Set the same DSH_BROWSER_TOKEN in every DSH session and in the extension popup.');
   }
   if (error && error.code === 'TIMEOUT') {
     lines.push('');
     lines.push('Tip: if a native alert/confirm dialog is open, use chrome_dialog to inspect/handle it, or enable dialog interception in the extension popup.');
   }
-  if (process.env.OPENCODE_BROWSER_DEBUG === '1' && error && error.stack) {
+  if (process.env.DSH_BROWSER_DEBUG === '1' && error && error.stack) {
     lines.push('');
     lines.push(error.stack);
   }

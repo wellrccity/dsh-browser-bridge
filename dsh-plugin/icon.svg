@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Chrome browser bridge">
+  <defs>
+    <linearGradient id="oob-window" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f7fd8"/>
+      <stop offset="1" stop-color="#1f5fa8"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="9" width="42" height="34" rx="5" fill="url(#oob-window)"/>
+  <rect x="3" y="9" width="42" height="9" rx="5" fill="#164a85"/>
+  <circle cx="8.5" cy="13.5" r="1.6" fill="#cfe4fb"/>
+  <circle cx="14" cy="13.5" r="1.6" fill="#cfe4fb"/>
+  <circle cx="19.5" cy="13.5" r="1.6" fill="#cfe4fb"/>
+  <rect x="8" y="23" width="21" height="3.2" rx="1.6" fill="#dceafb"/>
+  <rect x="8" y="30" width="15" height="3.2" rx="1.6" fill="#dceafb"/>
+  <rect x="47" y="26" width="14" height="9" rx="3" fill="#e8a33d"/>
+  <rect x="50" y="47" width="11" height="9" rx="3" fill="#e8a33d"/>
+  <path d="M54 35v12" fill="none" stroke="#e8a33d" stroke-width="3.4" stroke-linecap="round"/>
+  <path d="M20 41h14a6 6 0 0 0 6-6v-9" fill="none" stroke="#f0f4f9" stroke-width="3.4" stroke-linecap="round"/>
+  <path d="M40 20v12a9 9 0 0 1-9 9H18" fill="none" stroke="#8fb6e2" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="4 4"/>
+</svg>

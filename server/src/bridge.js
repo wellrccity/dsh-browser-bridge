@@ -4,7 +4,7 @@
  * Security model:
  *  - listens on loopback only (default 127.0.0.1)
  *  - rejects web-page origins; only chrome-extension:// (or no Origin) is allowed
- *  - optional shared token (OPENCODE_BROWSER_TOKEN / extension settings)
+ *  - optional shared token (DSH_BROWSER_TOKEN / extension settings)
  *  - a single active extension connection; a new one replaces the old one
  */
 
@@ -75,7 +75,7 @@ export class BrowserBridge extends EventEmitter {
           this.wss.off('listening', onListening);
           if (error && error.code === 'EADDRINUSE') {
             reject(new BridgeError(
-              `Port ${this.port} is already in use. Stop the other bridge instance or set OPENCODE_BROWSER_PORT to a free port and update the extension settings.`,
+              `Port ${this.port} is already in use. Stop the other bridge instance or set DSH_BROWSER_PORT to a free port and update the extension settings.`,
               'PORT_IN_USE'
             ));
           } else {
@@ -148,7 +148,7 @@ export class BrowserBridge extends EventEmitter {
       return;
     }
 
-    // Another OpenCode session attaches here instead of listening on the port
+    // Another DSH session attaches here instead of listening on the port
     // itself. Control clients never replace the extension connection.
     if (role === 'control') {
       this.handleControl(socket);
@@ -242,7 +242,7 @@ export class BrowserBridge extends EventEmitter {
 
     this.sendTo(socket, {
       type: 'control_welcome',
-      server: 'opencode-browser-bridge',
+      server: 'dsh-browser-bridge',
       version: '0.1.3',
       status: this.status()
     });
@@ -318,7 +318,7 @@ export class BrowserBridge extends EventEmitter {
       this.logger(`hello from extension v${this.hello.version} (${this.hello.extensionId || 'unknown id'})`);
       this.sendTo(socket, {
         type: 'welcome',
-        server: 'opencode-browser-bridge',
+        server: 'dsh-browser-bridge',
         version: '0.1.3',
         heartbeatSeconds: 20
       });
@@ -402,7 +402,7 @@ export class BrowserBridge extends EventEmitter {
   async request(method, params = {}, options = {}) {
     if (!this.connected) {
       throw new BridgeError(
-        'The Chrome extension is not connected. Open chrome://extensions, make sure "OpenCode Browser Bridge" is enabled, then click its toolbar icon and verify the server URL.',
+        'The Chrome extension is not connected. Open chrome://extensions, make sure "DSH Browser Bridge" is enabled, then click its toolbar icon and verify the server URL.',
         'NOT_CONNECTED'
       );
     }

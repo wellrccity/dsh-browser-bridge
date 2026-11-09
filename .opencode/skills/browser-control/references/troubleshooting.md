@@ -14,7 +14,7 @@ The server is started by OpenCode. **Do not** run another `node server/src/index
 
 - Confirm that OpenCode is open and the MCP `chrome` server is connected (`opencode mcp list`).
 - Check the URL in the popup: default `ws://127.0.0.1:8787`.
-- If a token is used, it must match `OPENCODE_BROWSER_TOKEN` in the server environment.
+- If a token is used, it must match `DSH_BROWSER_TOKEN` in the server environment.
 - Reload the extension and click **Connect** in the popup.
 - Check the OpenCode log at `~/.local/share/opencode/log/opencode.log` and search for `mcp connected`, `extension ready`, or `extension disconnected`.
 
@@ -81,7 +81,7 @@ Another process is using the port. Do not start a second instance without need. 
 Get-NetTCPConnection -LocalPort 8787 -State Listen | Select-Object LocalAddress, LocalPort, OwningProcess
 ```
 
-If you need to change the port, update `OPENCODE_BROWSER_PORT` in `opencode.jsonc` **and** the URL in the extension popup.
+If you need to change the port, update `DSH_BROWSER_PORT` in `opencode.jsonc` **and** the URL in the extension popup.
 
 ## Agent Doesn't See the Browser or Acts on the Wrong Tab
 

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "OpenCode Browser Bridge",
+  "name": "DSH Browser Bridge",
   "version": "0.1.3",
-  "description": "Lets OpenCode control Chrome like a human: navigate, inspect the DOM, click, type, fill forms and take screenshots.",
+  "description": "Lets DSH control Chrome like a human: navigate, inspect the DOM, click, type, fill forms and take screenshots.",
   "minimum_chrome_version": "116",
   "permissions": [
     "tabs",
@@ -21,7 +21,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "OpenCode Browser Bridge",
+    "default_title": "DSH Browser Bridge",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",

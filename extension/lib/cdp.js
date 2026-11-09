@@ -626,27 +626,45 @@ const CURSOR_INIT = `(() => {
     'transition:transform 0.08s ease-out',
     'will-change:transform'
   ].join(';');
-  // Hot-orange arrow with thick dark outline + drop-shadow glow
-  // SVG viewBox origin at (0,0) = tip of the arrow
-  d.innerHTML = \`<svg width="28" height="32" viewBox="-4 -4 28 36"
+  // Cosmic arrow: blue-to-purple gradient fill, deep indigo outline, dual glow,
+  // a pulsing halo and a gentle breathing scale so the pointer reads as "alive".
+  // SVG viewBox origin at (0,0) = tip of the arrow, drawn 1:1 and offset by
+  // left/top so the tip lands exactly on the target coordinates.
+  d.innerHTML = \`<svg width="30" height="38" viewBox="-6 -6 30 38"
       xmlns="http://www.w3.org/2000/svg"
-      style="display:block;pointer-events:none;overflow:visible">
+      style="display:block;position:absolute;left:-6px;top:-6px;pointer-events:none;overflow:visible">
     <defs>
-      <filter id="oc-glow" x="-60%" y="-60%" width="220%" height="220%">
-        <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#ff6a00" flood-opacity="0.9"/>
-        <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#ff6a00" flood-opacity="0.5"/>
+      <linearGradient id="oc-grad" x1="0" y1="0" x2="0.85" y2="1">
+        <stop offset="0" stop-color="#6ee7ff"/>
+        <stop offset="0.45" stop-color="#4a7dff"/>
+        <stop offset="1" stop-color="#a855f7"/>
+      </linearGradient>
+      <filter id="oc-glow" x="-80%" y="-80%" width="260%" height="260%">
+        <feDropShadow dx="0" dy="0" stdDeviation="2.5" flood-color="#4a7dff" flood-opacity="0.95"/>
+        <feDropShadow dx="0" dy="0" stdDeviation="6.5" flood-color="#a855f7" flood-opacity="0.6"/>
       </filter>
     </defs>
-    <!-- thick dark outline for contrast on any background -->
-    <path d="M0 0 L0 20 L5.5 14.5 L9.5 23 L13 21.5 L9 13 L16 13 Z"
-          fill="#1a0a00" stroke="#1a0a00" stroke-width="4"
-          stroke-linejoin="round" stroke-linecap="round"/>
-    <!-- vivid orange fill -->
-    <path d="M0 0 L0 20 L5.5 14.5 L9.5 23 L13 21.5 L9 13 L16 13 Z"
-          fill="#ff6a00" stroke="#ffb347" stroke-width="1"
-          stroke-linejoin="round" filter="url(#oc-glow)"/>
-    <!-- white hot-spot dot at tip -->
-    <circle cx="0" cy="0" r="2" fill="white" opacity="0.9"/>
+    <g>
+      <animateTransform attributeName="transform" type="scale"
+        values="1 1;1.035 1.035;1 1" dur="2.6s" repeatCount="indefinite"/>
+      <!-- pulsing purple halo behind the tip -->
+      <circle cx="0" cy="0" r="2.4" fill="#a855f7" opacity="0.5">
+        <animate attributeName="r" values="2.2;4.8;2.2" dur="1.8s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.5;0.1;0.5" dur="1.8s" repeatCount="indefinite"/>
+      </circle>
+      <!-- deep indigo outline keeps the arrow readable on any background -->
+      <path d="M0 0 L0 20 L5.5 14.5 L9.5 23 L13 21.5 L9 13 L16 13 Z"
+            fill="#12093a" stroke="#12093a" stroke-width="4.2"
+            stroke-linejoin="round" stroke-linecap="round"/>
+      <!-- cosmic gradient body -->
+      <path d="M0 0 L0 20 L5.5 14.5 L9.5 23 L13 21.5 L9 13 L16 13 Z"
+            fill="url(#oc-grad)" stroke="#cfe6ff" stroke-width="0.9"
+            stroke-linejoin="round" filter="url(#oc-glow)">
+        <animate attributeName="opacity" values="0.94;1;0.94" dur="2.6s" repeatCount="indefinite"/>
+      </path>
+      <!-- bright hot-spot exactly at the click point -->
+      <circle cx="0" cy="0" r="1.6" fill="#ffffff" opacity="0.95"/>
+    </g>
   </svg>\`;
   document.documentElement.appendChild(d);
 })()`;
@@ -684,16 +702,30 @@ export async function ensureCursor(tabId) {
           'transition:transform 0.08s ease-out',
           'will-change:transform'
         ].join(';');
-        d.innerHTML = '<svg width="28" height="32" viewBox="-4 -4 28 36" xmlns="http://www.w3.org/2000/svg" style="display:block;pointer-events:none;overflow:visible">'
+        d.innerHTML = '<svg width="30" height="38" viewBox="-6 -6 30 38" xmlns="http://www.w3.org/2000/svg" style="display:block;position:absolute;left:-6px;top:-6px;pointer-events:none;overflow:visible">'
           + '<defs>'
-          + '<filter id="oc-glow" x="-60%" y="-60%" width="220%" height="220%">'
-          + '<feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#ff6a00" flood-opacity="0.9"/>'
-          + '<feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#ff6a00" flood-opacity="0.5"/>'
+          + '<linearGradient id="oc-grad" x1="0" y1="0" x2="0.85" y2="1">'
+          + '<stop offset="0" stop-color="#6ee7ff"/>'
+          + '<stop offset="0.45" stop-color="#4a7dff"/>'
+          + '<stop offset="1" stop-color="#a855f7"/>'
+          + '</linearGradient>'
+          + '<filter id="oc-glow" x="-80%" y="-80%" width="260%" height="260%">'
+          + '<feDropShadow dx="0" dy="0" stdDeviation="2.5" flood-color="#4a7dff" flood-opacity="0.95"/>'
+          + '<feDropShadow dx="0" dy="0" stdDeviation="6.5" flood-color="#a855f7" flood-opacity="0.6"/>'
           + '</filter>'
           + '</defs>'
-          + '<path d="M0 0 L0 20 L5.5 14.5 L9.5 23 L13 21.5 L9 13 L16 13 Z" fill="#1a0a00" stroke="#1a0a00" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>'
-          + '<path d="M0 0 L0 20 L5.5 14.5 L9.5 23 L13 21.5 L9 13 L16 13 Z" fill="#ff6a00" stroke="#ffb347" stroke-width="1" stroke-linejoin="round" filter="url(#oc-glow)"/>'
-          + '<circle cx="0" cy="0" r="2" fill="white" opacity="0.9"/>'
+          + '<g>'
+          + '<animateTransform attributeName="transform" type="scale" values="1 1;1.035 1.035;1 1" dur="2.6s" repeatCount="indefinite"/>'
+          + '<circle cx="0" cy="0" r="2.4" fill="#a855f7" opacity="0.5">'
+          + '<animate attributeName="r" values="2.2;4.8;2.2" dur="1.8s" repeatCount="indefinite"/>'
+          + '<animate attributeName="opacity" values="0.5;0.1;0.5" dur="1.8s" repeatCount="indefinite"/>'
+          + '</circle>'
+          + '<path d="M0 0 L0 20 L5.5 14.5 L9.5 23 L13 21.5 L9 13 L16 13 Z" fill="#12093a" stroke="#12093a" stroke-width="4.2" stroke-linejoin="round" stroke-linecap="round"/>'
+          + '<path d="M0 0 L0 20 L5.5 14.5 L9.5 23 L13 21.5 L9 13 L16 13 Z" fill="url(#oc-grad)" stroke="#cfe6ff" stroke-width="0.9" stroke-linejoin="round" filter="url(#oc-glow)">'
+          + '<animate attributeName="opacity" values="0.94;1;0.94" dur="2.6s" repeatCount="indefinite"/>'
+          + '</path>'
+          + '<circle cx="0" cy="0" r="1.6" fill="#ffffff" opacity="0.95"/>'
+          + '</g>'
           + '</svg>';
         document.documentElement.appendChild(d);
       }

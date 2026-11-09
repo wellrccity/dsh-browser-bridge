@@ -155,9 +155,9 @@ test('MCP server exposes tools and relays browser commands', { timeout: 30000 },
     stderr: 'pipe',
     env: {
       ...getDefaultEnvironment(),
-      OPENCODE_BROWSER_HOST: '127.0.0.1',
-      OPENCODE_BROWSER_PORT: String(port),
-      OPENCODE_BROWSER_TOKEN: ''
+      DSH_BROWSER_HOST: '127.0.0.1',
+      DSH_BROWSER_PORT: String(port),
+      DSH_BROWSER_TOKEN: ''
     }
   });
   transport.stderr?.on('data', (chunk) => {
@@ -241,9 +241,9 @@ test('two MCP servers share one browser bridge', { timeout: 30000 }, async () =>
       stderr: 'pipe',
       env: {
         ...getDefaultEnvironment(),
-        OPENCODE_BROWSER_HOST: '127.0.0.1',
-        OPENCODE_BROWSER_PORT: String(port),
-        OPENCODE_BROWSER_TOKEN: ''
+        DSH_BROWSER_HOST: '127.0.0.1',
+        DSH_BROWSER_PORT: String(port),
+        DSH_BROWSER_TOKEN: ''
       }
     });
     transport.stderr?.on('data', (chunk) => {

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Ponte de navegador Chrome",
+    "description": "Executa o servidor MCP OpenCode Browser Bridge, que controla um Chrome real pela extensão incluída e expõe as ferramentas chrome_* ao agente."
+  }
+}

@@ -1,11 +1,11 @@
 ---
 name: Browser control
-description: Controls real Chrome via the OpenCode Browser Bridge extension and the chrome_* tools. Use whenever the user asks to open or navigate sites, inspect the DOM, click, type, fill forms, test a web application, take screenshots, read console/network, manage cookies, emulate a device, or automate any browser flow — even if they don't explicitly mention "browser" or "Chrome" (browser automation, web testing, Chrome control, DOM inspection, screenshots, form filling).
+description: Controls real Chrome via the DSH Browser Bridge extension and the chrome_* tools. Use whenever the user asks to open or navigate sites, inspect the DOM, click, type, fill forms, test a web application, take screenshots, read console/network, manage cookies, emulate a device, or automate any browser flow — even if they don't explicitly mention "browser" or "Chrome" (browser automation, web testing, Chrome control, DOM inspection, screenshots, form filling).
 ---
 
 # Browser control
 
-This skill is the user manual for the **OpenCode Browser Bridge** integration: a local MCP server (`chrome`) plus an MV3 extension that controls real Google Chrome, with trusted CDP input when available.
+This skill is the user manual for the **DSH Browser Bridge** integration: a local MCP server (`chrome`) plus an MV3 extension that controls real Google Chrome, with trusted CDP input when available.
 
 The MCP server is already started by OpenCode and injects its instructions into the session. This skill complements that with the workflow, recipes, and safeguards that don't fit in the short tool descriptions. If the server is connected, the agent will see the `chrome_*` tools; this skill does not replace the connection.
 
@@ -55,7 +55,7 @@ chrome_cursor { x: 450, y: 320 }
 chrome_cursor { action: "hide" }
 ```
 
-The cursor is a vivid glowing orange arrow (`#ff6a00`) with a dark outline and drop-shadow, clearly visible against both light and dark backgrounds. It **loads automatically** as soon as the MCP is activated or whenever any tool interacts with a tab.
+The cursor is a cosmic arrow with a cyan-to-purple gradient (`#6ee7ff` → `#4a7dff` → `#a855f7`), a deep indigo outline, a dual blue/purple glow, a pulsing halo at the tip and a slow breathing scale, clearly visible against both light and dark backgrounds. It **loads automatically** as soon as the MCP is activated or whenever any tool interacts with a tab.
 
 **For non-vision models**: `chrome_cursor` also returns the element currently under the cursor in its text response:
 ```
@@ -73,7 +73,7 @@ When `chrome_type` is called with a target (`ref` or `selector`), the complete h
 
 ```
 // Simply provide the target ref and text; cursor movement and click activation happen automatically:
-chrome_type { ref: "f0_e4", text: "OpenCode Browser Bridge" }
+chrome_type { ref: "f0_e4", text: "DSH Browser Bridge" }
 ```
 
 - **No DOM manipulation**: Uses `Input.insertText` via CDP, working cleanly on React, Vue, Angular and web components.

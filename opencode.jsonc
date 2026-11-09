@@ -12,7 +12,7 @@
         "codemode": false,
         // Keep this port in sync with the extension popup.
         "environment": {
-          "OPENCODE_BROWSER_PORT": "8787"
+          "DSH_BROWSER_PORT": "8787"
         },
         "timeout": {
           "startup": 30000,

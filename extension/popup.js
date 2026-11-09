@@ -1,5 +1,5 @@
 /*
- * Popup controller for the OpenCode Browser Bridge extension.
+ * Popup controller for the DSH Browser Bridge extension.
  * All UI text is English; the MCP tool descriptions live on the server.
  */
 

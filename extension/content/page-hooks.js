@@ -1,5 +1,5 @@
 /*
- * OpenCode Browser Bridge - page hooks (MAIN world, document_start).
+ * DSH Browser Bridge - page hooks (MAIN world, document_start).
  *
  * Buffers console output, unhandled errors, fetch/XHR activity and JavaScript
  * dialogs so the agent can inspect them later. It also lets the agent decide
@@ -11,7 +11,7 @@
 (() => {
   'use strict';
 
-  const KEY = '__OPENCODE_HOOKS__';
+  const KEY = '__DSH_HOOKS__';
   const VERSION = 1;
   if (globalThis[KEY] && globalThis[KEY].version === VERSION) return;
 

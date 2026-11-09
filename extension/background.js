@@ -1,5 +1,5 @@
 /*
- * OpenCode Browser Bridge - MV3 service worker.
+ * DSH Browser Bridge - MV3 service worker.
  *
  * Maintains a WebSocket connection to the local MCP bridge, receives JSON-RPC
  * style commands and executes them against Chrome (tabs, DOM agent, CDP).
@@ -11,7 +11,7 @@ import * as cdp from './lib/cdp.js';
 import { processScreenshot, dataUrlToBase64 } from './lib/image.js';
 
 const VERSION = chrome.runtime.getManifest().version;
-const KEEPALIVE_ALARM = 'opencode-browser-keepalive';
+const KEEPALIVE_ALARM = 'dsh-browser-keepalive';
 
 let settings = { ...DEFAULT_SETTINGS };
 let ws = null;
@@ -29,7 +29,7 @@ cdp.setDialogHandler(handleNativeDialog);
 
 const initPromise = ensureInitialized().catch((error) => {
   lastError = errorMessage(error);
-  console.error('[OpenCode Browser Bridge] init failed', error);
+  console.error('[DSH Browser Bridge] init failed', error);
 });
 
 async function ensureInitialized() {
@@ -413,8 +413,8 @@ function updateBadge() {
     chrome.action.setBadgeBackgroundColor({ color: wsState === 'connected' ? '#16a34a' : '#6b7280' })?.catch?.(() => {});
     chrome.action.setTitle({
       title: wsState === 'connected'
-        ? 'OpenCode Browser Bridge: connected'
-        : 'OpenCode Browser Bridge: disconnected'
+        ? 'DSH Browser Bridge: connected'
+        : 'DSH Browser Bridge: disconnected'
     })?.catch?.(() => {});
   } catch {
     // Ignore.
@@ -682,8 +682,8 @@ async function waitForNetworkIdle(tabId, timeout = 30000) {
     }
     try {
       inflight = await execMain(tabId, 0, () => {
-        return globalThis.__OPENCODE_HOOKS__ && typeof globalThis.__OPENCODE_HOOKS__.inflight === 'function'
-          ? globalThis.__OPENCODE_HOOKS__.inflight()
+        return globalThis.__DSH_HOOKS__ && typeof globalThis.__DSH_HOOKS__.inflight === 'function'
+          ? globalThis.__DSH_HOOKS__.inflight()
           : 0;
       });
     } catch {
@@ -1992,13 +1992,13 @@ async function handleConsole(params = {}) {
   const action = String(params.action || 'get').toLowerCase();
   if (action === 'clear') {
     await execMainAllFrames(tab.id, () => {
-      if (globalThis.__OPENCODE_HOOKS__) return globalThis.__OPENCODE_HOOKS__.clearConsole();
+      if (globalThis.__DSH_HOOKS__) return globalThis.__DSH_HOOKS__.clearConsole();
       return false;
     });
     return { cleared: true, tab: tabInfo(tab) };
   }
   const injections = await execMainAllFrames(tab.id, (limit) => {
-    const hooks = globalThis.__OPENCODE_HOOKS__;
+    const hooks = globalThis.__DSH_HOOKS__;
     if (!hooks) return null;
     return hooks.getConsole(limit);
   }, [Math.max(1, Math.min(Number(params.limit) || 200, 400))]);
@@ -2027,13 +2027,13 @@ async function handleNetwork(params = {}) {
   const action = String(params.action || 'get').toLowerCase();
   if (action === 'clear') {
     await execMainAllFrames(tab.id, () => {
-      if (globalThis.__OPENCODE_HOOKS__) return globalThis.__OPENCODE_HOOKS__.clearNetwork();
+      if (globalThis.__DSH_HOOKS__) return globalThis.__DSH_HOOKS__.clearNetwork();
       return false;
     });
     return { cleared: true, tab: tabInfo(tab) };
   }
   const injections = await execMainAllFrames(tab.id, (limit, includeStatic) => {
-    const hooks = globalThis.__OPENCODE_HOOKS__;
+    const hooks = globalThis.__DSH_HOOKS__;
     if (!hooks) return null;
     return hooks.getNetwork(limit, includeStatic);
   }, [
@@ -2158,7 +2158,7 @@ async function handleDialog(params = {}) {
   const action = String(params.action || 'status').toLowerCase();
   if (action === 'status') {
     const policy = await execMain(tab.id, 0, () => {
-      const hooks = globalThis.__OPENCODE_HOOKS__;
+      const hooks = globalThis.__DSH_HOOKS__;
       return hooks ? { policy: hooks.getDialogPolicy(), dialogs: hooks.getDialogs(50) } : null;
     }).catch(() => null);
     return { ...(policy || { policy: null, dialogs: [] }), settings: { interceptDialogs: settings.interceptDialogs, confirmDialogs: settings.confirmDialogs, promptDialogText: settings.promptDialogText }, tab: tabInfo(tab) };
@@ -2175,14 +2175,14 @@ async function handleDialog(params = {}) {
     if (patch.prompt !== undefined) next.promptDialogText = String(patch.prompt == null ? '' : patch.prompt);
     settings = await saveSettings(next);
     await execMainAllFrames(tab.id, (policy) => {
-      if (globalThis.__OPENCODE_HOOKS__) return globalThis.__OPENCODE_HOOKS__.setDialogPolicy(policy);
+      if (globalThis.__DSH_HOOKS__) return globalThis.__DSH_HOOKS__.setDialogPolicy(policy);
       return null;
     }, [patch]).catch(() => {});
     return { policy: patch, settings: { interceptDialogs: settings.interceptDialogs, confirmDialogs: settings.confirmDialogs, promptDialogText: settings.promptDialogText } };
   }
   if (action === 'clear') {
     await execMainAllFrames(tab.id, () => {
-      if (globalThis.__OPENCODE_HOOKS__) return globalThis.__OPENCODE_HOOKS__.clearDialogs();
+      if (globalThis.__DSH_HOOKS__) return globalThis.__DSH_HOOKS__.clearDialogs();
       return false;
     });
     return { cleared: true };

@@ -1,0 +1,33 @@
+{
+  "name": "@local/opencode-browser-bridge",
+  "version": "0.1.3",
+  "private": true,
+  "type": "module",
+  "description": "DSH bundle that connects the DSH Browser Bridge MCP server, giving the agent chrome_* tools to drive a real Chrome.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "server/**",
+    "extension/**"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "ws": "^8.22.0",
+    "zod": "^4.6.7"
+  }
+}

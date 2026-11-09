@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /*
- * OpenCode Browser Bridge - MCP server entrypoint.
+ * DSH Browser Bridge - MCP server entrypoint.
  *
- * OpenCode starts this process over stdio. It also listens on a loopback
+ * DSH starts this process over stdio. It also listens on a loopback
  * WebSocket port for the Chrome extension. Nothing is ever written to stdout
  * except MCP protocol messages.
  */
@@ -14,7 +14,7 @@ import { registerTools } from './tools.js';
 
 const VERSION = '0.1.3';
 
-const INSTRUCTIONS = `Controls a real Google Chrome browser through the "OpenCode Browser Bridge" extension. Tools are exposed as chrome_*.
+const INSTRUCTIONS = `Controls a real Google Chrome browser through the "DSH Browser Bridge" extension. Tools are exposed as chrome_*.
 
 Workflow: chrome_status -> chrome_navigate (or chrome_tabs action="new") -> chrome_snapshot for refs like f0_e12 -> chrome_click/type/select/press/hover -> chrome_wait_for -> chrome_snapshot. Prefer snapshots over screenshots; use chrome_dom for HTML/styles/rects and chrome_evaluate for structured extraction.
 
@@ -33,22 +33,22 @@ function stderr(message) {
 }
 
 async function main() {
-  const port = Number(process.env.OPENCODE_BROWSER_PORT || 8787);
+  const port = Number(process.env.DSH_BROWSER_PORT || 8787);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(`Invalid OPENCODE_BROWSER_PORT: ${process.env.OPENCODE_BROWSER_PORT}`);
+    throw new Error(`Invalid DSH_BROWSER_PORT: ${process.env.DSH_BROWSER_PORT}`);
   }
-  const host = process.env.OPENCODE_BROWSER_HOST || '127.0.0.1';
+  const host = process.env.DSH_BROWSER_HOST || '127.0.0.1';
   const loopback = host === '127.0.0.1' || host === 'localhost' || host === '::1';
-  if (!loopback && process.env.OPENCODE_BROWSER_ALLOW_REMOTE !== '1') {
-    throw new Error(`Refusing to listen on ${host}. Use OPENCODE_BROWSER_ALLOW_REMOTE=1 only if you understand the risk.`);
+  if (!loopback && process.env.DSH_BROWSER_ALLOW_REMOTE !== '1') {
+    throw new Error(`Refusing to listen on ${host}. Use DSH_BROWSER_ALLOW_REMOTE=1 only if you understand the risk.`);
   }
-  const token = process.env.OPENCODE_BROWSER_TOKEN || '';
+  const token = process.env.DSH_BROWSER_TOKEN || '';
 
   const bridge = new BridgeConnection({
     host,
     port,
     token,
-    requestTimeout: Number(process.env.OPENCODE_BROWSER_REQUEST_TIMEOUT || 30000)
+    requestTimeout: Number(process.env.DSH_BROWSER_REQUEST_TIMEOUT || 30000)
   });
 
   bridge.on('ready', (hello) => {

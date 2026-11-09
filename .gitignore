@@ -3,6 +3,10 @@ node_modules/
 .DS_Store
 Thumbs.db
 
+# Private keys and temporary credentials — never publish
+*.pem
+.push-token
+
 # Local data/work folders (not part of the project)
 kaggle-s6e10/
 titanic/

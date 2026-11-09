@@ -1,5 +1,5 @@
 /*
- * OpenCode Browser Bridge - in-page agent (ISOLATED world).
+ * DSH Browser Bridge - in-page agent (ISOLATED world).
  *
  * Injected on demand by the service worker into the target frame. It exposes
  * an idempotent `__OC_AGENT__.handle()` entrypoint used for snapshots, element
